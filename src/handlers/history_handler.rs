@@ -30,9 +30,9 @@ pub async fn handle_history(
 
     let response = if let Some(username_b) = usernames.get(1) {
         let user_b = db::upsert_user_by_username(&conn, username_b)?;
-        db::format_head_to_head(&conn, &user_a, &user_b, page)?
+        db::format_head_to_head(&conn, &user_a, &user_b, chat_id, page)?
     } else {
-        db::format_user_history(&conn, &user_a, page)?
+        db::format_user_history(&conn, &user_a, chat_id, page)?
     };
 
     state

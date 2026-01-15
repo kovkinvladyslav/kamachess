@@ -6,10 +6,13 @@ use rusqlite::{params, OptionalExtension};
 use crate::models::{DbUser, GameRow, HistoryRow, User};
 
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
+const MIGRATION_002: &str = include_str!("../../migrations/002_add_draw_proposed_by.sql");
 
 pub fn init_db(pool: &Pool<SqliteConnectionManager>) -> Result<()> {
     let conn = pool.get()?;
     conn.execute_batch(INIT_SQL)?;
+    // Try to apply migration 002 (idempotent - fails silently if column already exists)
+    let _ = conn.execute_batch(MIGRATION_002);
     Ok(())
 }
 
@@ -116,8 +119,24 @@ pub fn update_game_result(
 ) -> Result<()> {
     let ended = Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE games SET result = ?1, status = ?2, ended_at = ?3 WHERE id = ?4",
+        "UPDATE games SET result = ?1, status = ?2, ended_at = ?3, draw_proposed_by = NULL WHERE id = ?4",
         params![result, status, ended, game_id],
+    )?;
+    Ok(())
+}
+
+pub fn propose_draw(conn: &rusqlite::Connection, game_id: i64, player_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE games SET draw_proposed_by = ?1 WHERE id = ?2",
+        params![player_id, game_id],
+    )?;
+    Ok(())
+}
+
+pub fn clear_draw_proposal(conn: &rusqlite::Connection, game_id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE games SET draw_proposed_by = NULL WHERE id = ?1",
+        params![game_id],
     )?;
     Ok(())
 }
@@ -182,7 +201,7 @@ pub fn find_ongoing_game(
     black_id: i64,
 ) -> Result<Option<GameRow>> {
     conn.query_row(
-        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id
+        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id, draw_proposed_by
          FROM games
          WHERE chat_id = ?1 AND status = 'ongoing'
            AND ((white_user_id = ?2 AND black_user_id = ?3)
@@ -201,7 +220,7 @@ pub fn find_game_by_message(
     message_id: i64,
 ) -> Result<Option<GameRow>> {
     conn.query_row(
-        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id
+        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id, draw_proposed_by
          FROM games
          WHERE chat_id = ?1 AND last_message_id = ?2
          LIMIT 1",
@@ -212,12 +231,46 @@ pub fn find_game_by_message(
     .map_err(|err| anyhow!(err))
 }
 
-pub fn format_user_history(conn: &rusqlite::Connection, user: &DbUser, page: u32) -> Result<String> {
-    let total = user.wins + user.losses + user.draws;
+pub fn format_user_history(
+    conn: &rusqlite::Connection,
+    user: &DbUser,
+    chat_id: i64,
+    page: u32,
+) -> Result<String> {
+    let (wins, losses, draws) = conn.query_row(
+        "SELECT
+            SUM(CASE
+                WHEN result = '1-0' AND white_user_id = ?1 THEN 1
+                WHEN result = '0-1' AND black_user_id = ?1 THEN 1
+                ELSE 0
+            END) AS wins,
+            SUM(CASE
+                WHEN result = '0-1' AND white_user_id = ?1 THEN 1
+                WHEN result = '1-0' AND black_user_id = ?1 THEN 1
+                ELSE 0
+            END) AS losses,
+            SUM(CASE
+                WHEN result = '1/2-1/2' THEN 1
+                ELSE 0
+            END) AS draws
+         FROM games
+         WHERE chat_id = ?2
+           AND (white_user_id = ?1 OR black_user_id = ?1)",
+        params![user.id, chat_id],
+        |row| {
+            Ok((
+                row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            ))
+        },
+    )?;
+
+    let total = wins + losses + draws;
     let win_pct = if total == 0 {
         0.0
     } else {
-        (user.wins as f64) * 100.0 / (total as f64)
+        (wins as f64) * 100.0 / (total as f64)
     };
 
     let limit = 10;
@@ -227,11 +280,12 @@ pub fn format_user_history(conn: &rusqlite::Connection, user: &DbUser, page: u32
          FROM games g
          JOIN users u1 ON g.white_user_id = u1.id
          JOIN users u2 ON g.black_user_id = u2.id
-         WHERE g.white_user_id = ?1 OR g.black_user_id = ?1
+         WHERE g.chat_id = ?1
+           AND (g.white_user_id = ?2 OR g.black_user_id = ?2)
          ORDER BY g.started_at DESC
-         LIMIT ?2 OFFSET ?3",
+         LIMIT ?3 OFFSET ?4",
     )?;
-    let rows = stmt.query_map(params![user.id, limit, offset], |row| {
+    let rows = stmt.query_map(params![chat_id, user.id, limit, offset], |row| {
         Ok(HistoryRow {
             id: row.get(0)?,
             started_at: row.get(1)?,
@@ -254,11 +308,11 @@ pub fn format_user_history(conn: &rusqlite::Connection, user: &DbUser, page: u32
     }
 
     let mut output = format!(
-        "History for {}.\nWins: {}, Losses: {}, Draws: {}, Win%: {:.1}\n",
+        "History for {} in this chat.\nWins: {}, Losses: {}, Draws: {}, Win%: {:.1}\n",
         crate::utils::escape_html(&user.display_name()),
-        user.wins,
-        user.losses,
-        user.draws,
+        wins,
+        losses,
+        draws,
         win_pct
     );
     output.push_str(&lines.join("\n"));
@@ -273,14 +327,17 @@ pub fn format_head_to_head(
     conn: &rusqlite::Connection,
     user_a: &DbUser,
     user_b: &DbUser,
+    chat_id: i64,
     page: u32,
 ) -> Result<String> {
     let mut stmt = conn.prepare(
         "SELECT COUNT(*) FROM games
-         WHERE (white_user_id = ?1 AND black_user_id = ?2)
-            OR (white_user_id = ?2 AND black_user_id = ?1)",
+         WHERE chat_id = ?3
+           AND ((white_user_id = ?1 AND black_user_id = ?2)
+             OR (white_user_id = ?2 AND black_user_id = ?1))",
     )?;
-    let total: i64 = stmt.query_row(params![user_a.id, user_b.id], |row| row.get(0))?;
+    let total: i64 =
+        stmt.query_row(params![user_a.id, user_b.id, chat_id], |row| row.get(0))?;
 
     let limit = 10;
     let offset = ((page - 1) * limit) as i64;
@@ -289,12 +346,13 @@ pub fn format_head_to_head(
          FROM games g
          JOIN users u1 ON g.white_user_id = u1.id
          JOIN users u2 ON g.black_user_id = u2.id
-         WHERE (g.white_user_id = ?1 AND g.black_user_id = ?2)
-            OR (g.white_user_id = ?2 AND g.black_user_id = ?1)
+         WHERE g.chat_id = ?3
+           AND ((g.white_user_id = ?1 AND g.black_user_id = ?2)
+             OR (g.white_user_id = ?2 AND g.black_user_id = ?1))
          ORDER BY g.started_at DESC
-         LIMIT ?3 OFFSET ?4",
+         LIMIT ?4 OFFSET ?5",
     )?;
-    let rows = stmt.query_map(params![user_a.id, user_b.id, limit, offset], |row| {
+    let rows = stmt.query_map(params![user_a.id, user_b.id, chat_id, limit, offset], |row| {
         Ok(HistoryRow {
             id: row.get(0)?,
             started_at: row.get(1)?,
@@ -317,7 +375,7 @@ pub fn format_head_to_head(
     }
 
     let mut output = format!(
-        "Head-to-head {} vs {}. Total games: {}\n",
+        "Head-to-head {} vs {} in this chat. Total games: {}\n",
         crate::utils::escape_html(&user_a.display_name()),
         crate::utils::escape_html(&user_b.display_name()),
         total
