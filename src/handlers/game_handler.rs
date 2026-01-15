@@ -131,7 +131,7 @@ pub async fn handle_move(
             .send_message(
                 chat_id,
                 message.message_id,
-                "Please send a move like e4 or e2e4.",
+                "Please send a move like e4, e2e4, or Nf6.",
             )
             .await?;
         return Ok(());

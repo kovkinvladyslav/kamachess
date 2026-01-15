@@ -21,10 +21,13 @@ pub fn extract_usernames(text: &str) -> Vec<String> {
 pub fn extract_move(text: &str) -> Option<String> {
     text.split_whitespace().rev().find_map(|token| {
         let cleaned = token
-            .trim_matches(|c: char| !c.is_alphanumeric())
+            .trim_matches(|c: char| {
+                // Keep SAN characters: -, +, #, =, x, X, O, 0
+                !c.is_alphanumeric() && c != '-' && c != '+' && c != '#' && c != '=' && c != 'x' && c != 'X' && c != 'O' && c != '0'
+            })
             .to_string();
         if is_move_candidate(&cleaned) {
-            Some(cleaned.to_lowercase())
+            Some(cleaned) // Don't lowercase - preserve case for SAN notation
         } else {
             None
         }
@@ -39,5 +42,10 @@ pub fn extract_page(text: &str) -> Option<u32> {
 
 fn is_move_candidate(token: &str) -> bool {
     let len = token.len();
-    (len == 2 || len == 4 || len == 5) && token.chars().all(|c| c.is_alphanumeric())
+    // Accept SAN notation (2-7 chars: e4, Nf6, Qxd5, O-O-O, e8=Q+) and coordinate notation (2-5 chars)
+    if len < 2 || len > 7 {
+        return false;
+    }
+    // Allow alphanumeric and SAN-specific characters: -, +, #, =, x (for captures)
+    token.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '+' || c == '#' || c == '=' || c == 'x' || c == 'X')
 }

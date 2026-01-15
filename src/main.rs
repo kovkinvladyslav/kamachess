@@ -1,23 +1,9 @@
-mod api;
-mod db;
-mod game;
-mod handlers;
-mod models;
-mod parsing;
-mod utils;
-
 use anyhow::{anyhow, Result};
+use kamachess::{api, db, handlers, AppState};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::{env, sync::Arc, time::Duration};
 use tracing::{error, info};
-
-#[derive(Clone)]
-pub struct AppState {
-    pub db: Pool<SqliteConnectionManager>,
-    pub telegram: api::TelegramApi,
-    pub bot_username: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
