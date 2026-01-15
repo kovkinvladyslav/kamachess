@@ -1,4 +1,5 @@
 mod game_handler;
+mod help_handler;
 mod history_handler;
 mod update_router;
 
