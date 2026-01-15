@@ -3,6 +3,7 @@ use chess::Board;
 use chess::Color;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::{info, warn};
 use crate::models::{Message, User, UserRef};
 use crate::{AppState, db, game, parsing};
 
@@ -15,12 +16,25 @@ pub async fn handle_start_game(
     let conn = state.db.get()?;
     let chat_id = message.chat.id;
 
-    let opponent_ref = determine_opponent_from_reply(message)?;
+    let opponent_ref = match determine_opponent(message, text) {
+        Ok(opponent) => opponent,
+        Err(_) => {
+            state
+                .telegram
+                .send_message(
+                    chat_id,
+                    message.message_id,
+                    "Reply to a user's message or use /start @username [move].",
+                )
+                .await?;
+            return Ok(());
+        }
+    };
 
     let white = db::upsert_user(&conn, from)?;
     let black = match opponent_ref {
         UserRef::Telegram(user) => db::upsert_user(&conn, &user)?,
-        UserRef::Username(_) => unreachable!(),
+        UserRef::Username(username) => db::upsert_user_by_username(&conn, &username)?,
     };
 
     if db::find_ongoing_game(&conn, chat_id, white.id, black.id)?.is_some() {
@@ -40,10 +54,24 @@ pub async fn handle_start_game(
     let mut move_text: Option<String> = None;
     
     if let Some(candidate) = parsing::extract_move(text) {
+        let before_fen = board.to_string();
         let mv = game::parse_move(&board, &candidate)?;
         board = board.make_move_new(mv);
         initial_move = Some(mv);
-        move_text = Some(candidate);
+        move_text = Some(candidate.clone());
+        let uci = game::uci_string(mv);
+        let after_fen = board.to_string();
+        info!(
+            chat_id = chat_id,
+            player_id = white.id,
+            move_text = candidate.as_str(),
+            uci = uci.as_str(),
+            from = %mv.get_source(),
+            to = %mv.get_dest(),
+            fen_before = %before_fen,
+            fen_after = %after_fen,
+            "Initial move applied"
+        );
     }
 
     let game_id = db::create_game(
@@ -137,8 +165,47 @@ pub async fn handle_move(
         return Ok(());
     };
 
-    let mv = game::parse_move(&board, &candidate)?;
+    let before_fen = board.to_string();
+    let mv = match game::parse_move(&board, &candidate) {
+        Ok(mv) => mv,
+        Err(err) => {
+            warn!(
+                chat_id = chat_id,
+                game_id = game.id,
+                player_id = player.id,
+                move_text = candidate.as_str(),
+                fen = before_fen.as_str(),
+                "Move parse failed: {err:?}"
+            );
+            state
+                .telegram
+                .send_message(chat_id, message.message_id, &format!("Invalid move: {err}"))
+                .await?;
+            return Ok(());
+        }
+    };
     let next_board = board.make_move_new(mv);
+    let uci = game::uci_string(mv);
+    let after_fen = next_board.to_string();
+    let from_sq = mv.get_source();
+    let to_sq = mv.get_dest();
+    info!(
+        chat_id = chat_id,
+        game_id = game.id,
+        player_id = player.id,
+        move_text = candidate.as_str(),
+        uci = uci.as_str(),
+        from = %from_sq,
+        to = %to_sq,
+        fen_before = %before_fen,
+        fen_after = %after_fen,
+        "Move applied"
+    );
+    
+    // Clear draw proposal if one exists (making a move declines the proposal)
+    if game.draw_proposed_by.is_some() {
+        db::clear_draw_proposal(&conn, game.id)?;
+    }
     
     let move_number = db::next_move_number(&conn, game.id)?;
     db::insert_move(
@@ -186,13 +253,23 @@ pub async fn handle_move(
     Ok(())
 }
 
-fn determine_opponent_from_reply(message: &Message) -> Result<UserRef> {
+fn determine_opponent(message: &Message, text: &str) -> Result<UserRef> {
     if let Some(reply) = &message.reply_to_message {
         if let Some(opponent) = reply.from.clone() {
+            if opponent.is_bot {
+                return Err(anyhow!("Cannot start a game against a bot."));
+            }
             return Ok(UserRef::Telegram(opponent));
         }
     }
-    Err(anyhow!("Reply to a user's message with /start <move> to begin a game."))
+
+    if let Some(username) = parsing::extract_usernames(text).into_iter().next() {
+        return Ok(UserRef::Username(username));
+    }
+
+    Err(anyhow!(
+        "Reply to a user's message or use /start @username [move] to begin a game."
+    ))
 }
 
 fn determine_game_result(
@@ -216,6 +293,191 @@ fn determine_game_result(
         chess::BoardStatus::Stalemate => ("Draw by stalemate.".to_string(), "1/2-1/2"),
         chess::BoardStatus::Ongoing => ("".to_string(), ""),
     }
+}
+
+pub async fn handle_resign(
+    state: Arc<AppState>,
+    message: &Message,
+    from: &User,
+) -> Result<()> {
+    let conn = state.db.get()?;
+    let chat_id = message.chat.id;
+    
+    let reply_id = message
+        .reply_to_message
+        .as_ref()
+        .map(|msg| msg.message_id)
+        .ok_or_else(|| anyhow!("Resign must be a reply to the bot's board message"))?;
+
+    let Some(game) = db::find_game_by_message(&conn, chat_id, reply_id)? else {
+        return Ok(());
+    };
+
+    if game.status != "ongoing" {
+        return Ok(());
+    }
+
+    let player = db::upsert_user(&conn, from)?;
+    if player.id != game.white_user_id && player.id != game.black_user_id {
+        return Ok(());
+    }
+
+    let white = db::get_user_by_id(&conn, game.white_user_id)?;
+    let black = db::get_user_by_id(&conn, game.black_user_id)?;
+    
+    let board = Board::from_str(&game.current_fen).map_err(|e| anyhow!("Invalid FEN: {}", e))?;
+    
+    // Determine winner (the one who didn't resign)
+    let (winner, loser, result) = if player.id == game.white_user_id {
+        (&black, &white, "0-1")
+    } else {
+        (&white, &black, "1-0")
+    };
+
+    db::update_game_result(&conn, game.id, &Some(result.to_string()), "finished")?;
+    db::update_player_stats(&conn, game.white_user_id, game.black_user_id, result)?;
+
+    let result_line = format!("{} resigned. {} wins.", loser.mention_html(), winner.mention_html());
+    
+    let message_id = send_board_update(
+        state.clone(),
+        chat_id,
+        Some(message.message_id),
+        "Game ended",
+        &board,
+        &white,
+        &black,
+        Some(result_line),
+    ).await?;
+
+    db::update_game_message(&conn, game.id, message_id)?;
+
+    Ok(())
+}
+
+pub async fn handle_draw_proposal(
+    state: Arc<AppState>,
+    message: &Message,
+    from: &User,
+) -> Result<()> {
+    let conn = state.db.get()?;
+    let chat_id = message.chat.id;
+    
+    let reply_id = message
+        .reply_to_message
+        .as_ref()
+        .map(|msg| msg.message_id)
+        .ok_or_else(|| anyhow!("Draw proposal must be a reply to the bot's board message"))?;
+
+    let Some(game) = db::find_game_by_message(&conn, chat_id, reply_id)? else {
+        return Ok(());
+    };
+
+    if game.status != "ongoing" {
+        return Ok(());
+    }
+
+    let player = db::upsert_user(&conn, from)?;
+    if player.id != game.white_user_id && player.id != game.black_user_id {
+        return Ok(());
+    }
+
+    // Propose draw
+    db::propose_draw(&conn, game.id, player.id)?;
+
+    let white = db::get_user_by_id(&conn, game.white_user_id)?;
+    let black = db::get_user_by_id(&conn, game.black_user_id)?;
+    let opponent = if player.id == game.white_user_id { &black } else { &white };
+    
+    state
+        .telegram
+        .send_message(
+            chat_id,
+            message.message_id,
+            &format!("{} proposed a draw. {} can accept with /accept or continue playing.", 
+                     player.mention_html(), opponent.mention_html()),
+        )
+        .await?;
+
+    Ok(())
+}
+
+pub async fn handle_accept_draw(
+    state: Arc<AppState>,
+    message: &Message,
+    from: &User,
+) -> Result<()> {
+    let conn = state.db.get()?;
+    let chat_id = message.chat.id;
+    
+    let reply_id = message
+        .reply_to_message
+        .as_ref()
+        .map(|msg| msg.message_id)
+        .ok_or_else(|| anyhow!("Accept must be a reply to the bot's board message"))?;
+
+    let Some(game) = db::find_game_by_message(&conn, chat_id, reply_id)? else {
+        return Ok(());
+    };
+
+    if game.status != "ongoing" {
+        return Ok(());
+    }
+
+    let player = db::upsert_user(&conn, from)?;
+    if player.id != game.white_user_id && player.id != game.black_user_id {
+        return Ok(());
+    }
+
+    // Check if there's a draw proposal and it's from the opponent
+    let Some(proposer_id) = game.draw_proposed_by else {
+        state
+            .telegram
+            .send_message(
+                chat_id,
+                message.message_id,
+                "No draw proposal is pending.",
+            )
+            .await?;
+        return Ok(());
+    };
+
+    if proposer_id == player.id {
+        state
+            .telegram
+            .send_message(
+                chat_id,
+                message.message_id,
+                "You cannot accept your own draw proposal.",
+            )
+            .await?;
+        return Ok(());
+    }
+
+    let board = Board::from_str(&game.current_fen).map_err(|e| anyhow!("Invalid FEN: {}", e))?;
+    let white = db::get_user_by_id(&conn, game.white_user_id)?;
+    let black = db::get_user_by_id(&conn, game.black_user_id)?;
+
+    // Game ends in draw
+    db::update_game_result(&conn, game.id, &Some("1/2-1/2".to_string()), "finished")?;
+    db::update_player_stats(&conn, game.white_user_id, game.black_user_id, "1/2-1/2")?;
+
+    let result_line = format!("Draw accepted by {}.", player.mention_html());
+    
+    let message_id = send_board_update(
+        state.clone(),
+        chat_id,
+        Some(message.message_id),
+        "Game ended",
+        &board,
+        &white,
+        &black,
+        Some(result_line),
+    ).await?;
+
+    db::update_game_message(&conn, game.id, message_id)?;
+
+    Ok(())
 }
 
 async fn send_board_update(
