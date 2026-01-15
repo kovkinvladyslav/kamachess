@@ -3,6 +3,14 @@ name = "kamachess"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "kamachess"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kamachess"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 axum = "0.7"
