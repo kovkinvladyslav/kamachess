@@ -104,6 +104,7 @@ pub struct GameRow {
     pub result: Option<String>,
     #[allow(dead_code)]
     pub last_message_id: Option<i64>,
+    pub draw_proposed_by: Option<i64>,
 }
 
 impl GameRow {
@@ -118,6 +119,7 @@ impl GameRow {
             status: row.get(6)?,
             result: row.get(7)?,
             last_message_id: row.get(8)?,
+            draw_proposed_by: row.get(9)?,
         })
     }
 }
