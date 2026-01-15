@@ -23,7 +23,10 @@ pub fn parse_move(board: &Board, input: &str) -> Result<ChessMove> {
             .map_err(|e| anyhow!("Invalid square: {}", e))?;
         
         let mut matches: Vec<ChessMove> = MoveGen::new_legal(board)
-            .filter(|m| m.get_dest() == dest)
+            .filter(|m| {
+                m.get_dest() == dest
+                    && board.piece_on(m.get_source()) == Some(Piece::Pawn)
+            })
             .collect();
             
         if matches.len() == 1 {
@@ -31,7 +34,8 @@ pub fn parse_move(board: &Board, input: &str) -> Result<ChessMove> {
         }
         
         return Err(anyhow!(
-            "Ambiguous or illegal move. Use coordinate form like e2e4 or SAN like Nf6."
+            "Illegal or ambiguous pawn move to {}. Use SAN like e4 or coordinate like e2e4.",
+            mv
         ));
     }
 
