@@ -2,3 +2,5 @@
 *.db
 .env
 /logs
+*.db-shm
+*.db-wal
