@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Result};
 use kamachess::{api, db, handlers, AppState};
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
+use sqlx::any::AnyPoolOptions;
 use std::{env, sync::Arc, time::Duration};
 use tracing::{error, info};
 use tracing_subscriber::prelude::*;
@@ -32,19 +31,17 @@ async fn main() -> Result<()> {
         .map_err(|_| anyhow!("TELEGRAM_BOT_USERNAME environment variable is required"))?
         .trim_start_matches('@')
         .to_string();
-    let db_path = env::var("DATABASE_PATH").unwrap_or_else(|_| "kamachess.db".to_string());
+    let database_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite://kamachess.db?mode=rwc".to_string());
 
-    let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch(
-            "PRAGMA foreign_keys = ON;
-             PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -16000;",
-        )?;
-        Ok(())
-    });
-    let pool = Pool::new(manager)?;
-    db::init_db(&pool)?;
+    sqlx::any::install_default_drivers();
+
+    let pool = AnyPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await?;
+
+    db::run_migrations(&pool, &database_url).await?;
 
     let state = Arc::new(AppState {
         db: pool,

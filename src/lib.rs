@@ -6,12 +6,11 @@ pub mod models;
 pub mod parsing;
 pub mod utils;
 
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
+use sqlx::{Any, Pool};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: Pool<SqliteConnectionManager>,
+    pub db: Pool<Any>,
     pub telegram: api::TelegramApi,
     pub bot_username: String,
 }
