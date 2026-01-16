@@ -1,11 +1,11 @@
+use crate::models::{Message, User, UserRef};
+use crate::{db, game, parsing, AppState};
 use anyhow::{anyhow, Result};
 use chess::Board;
 use chess::Color;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{info, warn};
-use crate::models::{Message, User, UserRef};
-use crate::{AppState, db, game, parsing};
 
 pub async fn handle_start_game(
     state: Arc<AppState>,
@@ -37,6 +37,14 @@ pub async fn handle_start_game(
         UserRef::Username(username) => db::upsert_user_by_username(&conn, &username)?,
     };
 
+    if white.id == black.id {
+        state
+            .telegram
+            .send_message(chat_id, message.message_id, "You cannot play against yourself.")
+            .await?;
+        return Ok(());
+    }
+
     if db::find_ongoing_game(&conn, chat_id, white.id, black.id)?.is_some() {
         state
             .telegram
@@ -52,7 +60,7 @@ pub async fn handle_start_game(
     let mut board = Board::default();
     let mut initial_move: Option<chess::ChessMove> = None;
     let mut move_text: Option<String> = None;
-    
+
     if let Some(candidate) = parsing::extract_move(text) {
         let before_fen = board.to_string();
         let mv = game::parse_move(&board, &candidate)?;
@@ -94,8 +102,18 @@ pub async fn handle_start_game(
         )?;
     }
 
-    let message_id = send_board_update(state.clone(), chat_id, None, "Game started", &board, &white, &black, None).await?;
-    
+    let message_id = send_board_update(
+        state.clone(),
+        chat_id,
+        None,
+        "Game started",
+        &board,
+        &white,
+        &black,
+        None,
+    )
+    .await?;
+
     db::update_game_message(&conn, game_id, message_id)?;
 
     Ok(())
@@ -109,7 +127,7 @@ pub async fn handle_move(
 ) -> Result<()> {
     let conn = state.db.get()?;
     let chat_id = message.chat.id;
-    
+
     let reply_id = message
         .reply_to_message
         .as_ref()
@@ -144,7 +162,7 @@ pub async fn handle_move(
     } else {
         game.black_user_id
     };
-    
+
     if player.id != expected_id {
         state
             .telegram
@@ -201,12 +219,11 @@ pub async fn handle_move(
         fen_after = %after_fen,
         "Move applied"
     );
-    
-    // Clear draw proposal if one exists (making a move declines the proposal)
+
     if game.draw_proposed_by.is_some() {
         db::clear_draw_proposal(&conn, game.id)?;
     }
-    
+
     let move_number = db::next_move_number(&conn, game.id)?;
     db::insert_move(
         &conn,
@@ -225,7 +242,7 @@ pub async fn handle_move(
 
     let status = next_board.status();
     let mut result_line = None;
-    
+
     if status != chess::BoardStatus::Ongoing {
         let (status_text, result) = determine_game_result(&status, side_to_move, &white, &black);
         result_line = Some(status_text);
@@ -246,7 +263,8 @@ pub async fn handle_move(
         &white,
         &black,
         result_line,
-    ).await?;
+    )
+    .await?;
 
     db::update_game_message(&conn, game.id, message_id)?;
 
@@ -256,10 +274,9 @@ pub async fn handle_move(
 fn determine_opponent(message: &Message, text: &str) -> Result<UserRef> {
     if let Some(reply) = &message.reply_to_message {
         if let Some(opponent) = reply.from.clone() {
-            if opponent.is_bot {
-                return Err(anyhow!("Cannot start a game against a bot."));
+            if !opponent.is_bot {
+                return Ok(UserRef::Telegram(opponent));
             }
-            return Ok(UserRef::Telegram(opponent));
         }
     }
 
@@ -287,7 +304,11 @@ fn determine_game_result(
             };
             (
                 format!("Checkmate. {} wins.", winner),
-                if side_to_move == Color::White { "0-1" } else { "1-0" },
+                if side_to_move == Color::White {
+                    "0-1"
+                } else {
+                    "1-0"
+                },
             )
         }
         chess::BoardStatus::Stalemate => ("Draw by stalemate.".to_string(), "1/2-1/2"),
@@ -295,14 +316,10 @@ fn determine_game_result(
     }
 }
 
-pub async fn handle_resign(
-    state: Arc<AppState>,
-    message: &Message,
-    from: &User,
-) -> Result<()> {
+pub async fn handle_resign(state: Arc<AppState>, message: &Message, from: &User) -> Result<()> {
     let conn = state.db.get()?;
     let chat_id = message.chat.id;
-    
+
     let reply_id = message
         .reply_to_message
         .as_ref()
@@ -324,10 +341,9 @@ pub async fn handle_resign(
 
     let white = db::get_user_by_id(&conn, game.white_user_id)?;
     let black = db::get_user_by_id(&conn, game.black_user_id)?;
-    
+
     let board = Board::from_str(&game.current_fen).map_err(|e| anyhow!("Invalid FEN: {}", e))?;
-    
-    // Determine winner (the one who didn't resign)
+
     let (winner, loser, result) = if player.id == game.white_user_id {
         (&black, &white, "0-1")
     } else {
@@ -337,8 +353,12 @@ pub async fn handle_resign(
     db::update_game_result(&conn, game.id, &Some(result.to_string()), "finished")?;
     db::update_player_stats(&conn, game.white_user_id, game.black_user_id, result)?;
 
-    let result_line = format!("{} resigned. {} wins.", loser.mention_html(), winner.mention_html());
-    
+    let result_line = format!(
+        "{} resigned. {} wins.",
+        loser.mention_html(),
+        winner.mention_html()
+    );
+
     let message_id = send_board_update(
         state.clone(),
         chat_id,
@@ -348,7 +368,8 @@ pub async fn handle_resign(
         &white,
         &black,
         Some(result_line),
-    ).await?;
+    )
+    .await?;
 
     db::update_game_message(&conn, game.id, message_id)?;
 
@@ -362,7 +383,7 @@ pub async fn handle_draw_proposal(
 ) -> Result<()> {
     let conn = state.db.get()?;
     let chat_id = message.chat.id;
-    
+
     let reply_id = message
         .reply_to_message
         .as_ref()
@@ -382,20 +403,26 @@ pub async fn handle_draw_proposal(
         return Ok(());
     }
 
-    // Propose draw
     db::propose_draw(&conn, game.id, player.id)?;
 
     let white = db::get_user_by_id(&conn, game.white_user_id)?;
     let black = db::get_user_by_id(&conn, game.black_user_id)?;
-    let opponent = if player.id == game.white_user_id { &black } else { &white };
-    
+    let opponent = if player.id == game.white_user_id {
+        &black
+    } else {
+        &white
+    };
+
     state
         .telegram
         .send_message(
             chat_id,
             message.message_id,
-            &format!("{} proposed a draw. {} can accept with /accept or continue playing.", 
-                     player.mention_html(), opponent.mention_html()),
+            &format!(
+                "{} proposed a draw. {} can accept with /accept or continue playing.",
+                player.mention_html(),
+                opponent.mention_html()
+            ),
         )
         .await?;
 
@@ -409,7 +436,7 @@ pub async fn handle_accept_draw(
 ) -> Result<()> {
     let conn = state.db.get()?;
     let chat_id = message.chat.id;
-    
+
     let reply_id = message
         .reply_to_message
         .as_ref()
@@ -429,15 +456,10 @@ pub async fn handle_accept_draw(
         return Ok(());
     }
 
-    // Check if there's a draw proposal and it's from the opponent
     let Some(proposer_id) = game.draw_proposed_by else {
         state
             .telegram
-            .send_message(
-                chat_id,
-                message.message_id,
-                "No draw proposal is pending.",
-            )
+            .send_message(chat_id, message.message_id, "No draw proposal is pending.")
             .await?;
         return Ok(());
     };
@@ -458,12 +480,11 @@ pub async fn handle_accept_draw(
     let white = db::get_user_by_id(&conn, game.white_user_id)?;
     let black = db::get_user_by_id(&conn, game.black_user_id)?;
 
-    // Game ends in draw
     db::update_game_result(&conn, game.id, &Some("1/2-1/2".to_string()), "finished")?;
     db::update_player_stats(&conn, game.white_user_id, game.black_user_id, "1/2-1/2")?;
 
     let result_line = format!("Draw accepted by {}.", player.mention_html());
-    
+
     let message_id = send_board_update(
         state.clone(),
         chat_id,
@@ -473,13 +494,15 @@ pub async fn handle_accept_draw(
         &white,
         &black,
         Some(result_line),
-    ).await?;
+    )
+    .await?;
 
     db::update_game_message(&conn, game.id, message_id)?;
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_board_update(
     state: Arc<AppState>,
     chat_id: i64,

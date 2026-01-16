@@ -1,8 +1,8 @@
-use anyhow::Result;
-use std::sync::Arc;
+use super::{game_handler, help_handler, history_handler};
 use crate::models::Update;
 use crate::AppState;
-use super::{game_handler, help_handler, history_handler};
+use anyhow::Result;
+use std::sync::Arc;
 
 pub async fn process_update(state: Arc<AppState>, update: Update) -> Result<()> {
     let Some(message) = update.message else {
@@ -14,7 +14,7 @@ pub async fn process_update(state: Arc<AppState>, update: Update) -> Result<()> 
     let Some(from) = &message.from else {
         return Ok(());
     };
-    
+
     if from.is_bot {
         return Ok(());
     }
@@ -36,29 +36,30 @@ pub async fn process_update(state: Arc<AppState>, update: Update) -> Result<()> 
         .map(|user| user.is_bot)
         .unwrap_or(false);
 
+    if text.starts_with("/start") {
+        game_handler::handle_start_game(state, &message, from, text).await?;
+        return Ok(());
+    }
+
     if replied_to_bot {
         if text.trim().eq_ignore_ascii_case("/resign") {
             game_handler::handle_resign(state, &message, from).await?;
             return Ok(());
         }
-        
+
         if text.trim().eq_ignore_ascii_case("/draw") {
             game_handler::handle_draw_proposal(state, &message, from).await?;
             return Ok(());
         }
-        
-        if text.trim().eq_ignore_ascii_case("/accept") || text.trim().eq_ignore_ascii_case("/acceptdraw") {
+
+        if text.trim().eq_ignore_ascii_case("/accept")
+            || text.trim().eq_ignore_ascii_case("/acceptdraw")
+        {
             game_handler::handle_accept_draw(state, &message, from).await?;
             return Ok(());
         }
-        
-        // Try to process as a move
-        game_handler::handle_move(state, &message, from, text).await?;
-        return Ok(());
-    }
 
-    if text.starts_with("/start") {
-        game_handler::handle_start_game(state, &message, from, text).await?;
+        game_handler::handle_move(state, &message, from, text).await?;
         return Ok(());
     }
 
