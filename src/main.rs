@@ -34,8 +34,9 @@ async fn main() -> Result<()> {
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://kamachess.db?mode=rwc".to_string());
     
-    // Check for --notrash flag to enable deletion of previous board messages during gameplay
-    let no_trash = env::args().any(|arg| arg == "--notrash");
+    // No-trash mode is now default: previous board messages are deleted during gameplay
+    // Use --keep-messages to disable this behavior
+    let no_trash = !env::args().any(|arg| arg == "--keep-messages");
 
     sqlx::any::install_default_drivers();
 
@@ -53,8 +54,8 @@ async fn main() -> Result<()> {
         no_trash,
     });
     
-    if no_trash {
-        info!("No-trash mode enabled: previous board messages will be deleted during gameplay");
+    if !no_trash {
+        info!("Keep-messages mode: previous board messages will be kept during gameplay");
     }
 
     info!("Bot started. Waiting for updates...");
