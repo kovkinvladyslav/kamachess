@@ -9,6 +9,7 @@ A Telegram chess bot written in Rust. Play chess in group chats with PNG board r
 - **Board Rendering**: Procedural PNG generation with piece bitmaps, no external assets
 - **Draw/Resign**: Propose draws, accept them, or resign mid-game
 - **Statistics**: Per-chat history, win/loss/draw tracking, head-to-head records
+- **Database**: SQLite (default) or PostgreSQL support via feature flags
 - **Logging**: Daily rotating log files with structured tracing
 
 ## Commands
@@ -34,40 +35,51 @@ cd kamachess
 cargo build --release
 ```
 
+For PostgreSQL support:
+
+```bash
+cargo build --release --features postgres --no-default-features
+```
+
 ## Configuration
 
-Create a `.env` file:
+Create a `.env` file (see `.env.example`):
 
 ```
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_BOT_USERNAME=your_bot_username
-DATABASE_PATH=kamachess.db    # optional, defaults to kamachess.db
-LOG_DIR=logs                  # optional, defaults to logs/
-RUST_LOG=info                 # optional, tracing filter
+DATABASE_URL=sqlite://kamachess.db?mode=rwc
+LOG_DIR=logs
+RUST_LOG=info
+```
+
+For PostgreSQL:
+
+```
+DATABASE_URL=postgres://user:password@localhost:5432/kamachess
 ```
 
 ## Running
+
+### Local (SQLite)
 
 ```bash
 cargo run --release
 ```
 
+### Local (PostgreSQL)
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost/kamachess cargo run --release --features postgres --no-default-features
+```
+
+### Docker (PostgreSQL)
+
+```bash
+docker-compose up
+```
+
 The bot uses long polling. Database schema is applied automatically on first run.
-
-## Project Structure
-
-```
-src/
-├── api/          # Telegram API client (reqwest, multipart uploads)
-├── db/           # SQLite queries, migrations via include_str!
-├── game/
-│   ├── chess.rs  # Move parsing (SAN + UCI), board status
-│   ├── render.rs # PNG generation with image crate
-│   └── glyphs.rs # 16x16 bitmap patterns for pieces
-├── handlers/     # Command routing and game logic
-├── parsing/      # Text extraction (moves, usernames, pagination)
-└── models.rs     # Telegram + DB structs
-```
 
 ## Technical Notes
 
@@ -75,7 +87,7 @@ src/
 
 **Move Parsing**: The `chess` crate handles legal move generation. This project adds a SAN parser on top that handles disambiguation (`Nbd7`, `R1e2`), castling variants (`O-O`, `0-0`), and promotions (`e8=Q`).
 
-**Database**: SQLite with `r2d2` connection pooling. Migrations are embedded via `include_str!` and applied idempotently at startup.
+**Database**: Supports SQLite (default) and PostgreSQL via `sqlx`. Migrations are embedded via `include_str!` and applied idempotently at startup.
 
 **Async**: Tokio runtime with `reqwest` for HTTP. Long polling with 30s timeout.
 
