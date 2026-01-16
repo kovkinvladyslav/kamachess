@@ -1,6 +1,6 @@
 # Kamachess
 
-A feature-rich Telegram chess bot built with Rust, enabling users to play chess games directly in Telegram chats with real-time board visualization and comprehensive game tracking.
+A Telegram chess bot built with Rust, enabling users to play chess games directly in Telegram chats with real-time board visualization and game tracking.
 
 ![Game Example](screenshots/game.png)
 
@@ -150,29 +150,6 @@ Commands work with bot username suffix in group chats:
 ```
 /start@your_bot_username
 /draw@your_bot_username
-```
-
-## Project Structure
-
-```
-kamachess/
-├── src/
-│   ├── api/              # Telegram Bot API client
-│   ├── db/               # Database operations and migrations
-│   ├── game/             # Chess logic, rendering, and notation
-│   ├── handlers/         # Command and update handlers
-│   ├── parsing/          # Move and command parsing
-│   ├── models.rs         # Data structures
-│   ├── utils.rs          # Utility functions
-│   ├── lib.rs            # Library root
-│   └── main.rs           # Application entry point
-├── migrations/           # Database schema migrations
-│   ├── sqlite/
-│   └── postgres/
-├── tests/                # Integration tests
-├── images_cache/         # Cached board images
-├── Dockerfile            # Multi-stage production build
-└── docker-compose.yml    # PostgreSQL + bot setup
 ```
 
 ## Architecture
