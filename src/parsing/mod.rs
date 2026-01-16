@@ -95,10 +95,15 @@ fn is_move_candidate(token: &str) -> bool {
         return false;
     }
 
+    // Check for castling notation variants
     if token.eq_ignore_ascii_case("O-O")
         || token.eq_ignore_ascii_case("O-O-O")
         || token == "0-0"
         || token == "0-0-0"
+        || token == "00"
+        || token == "000"
+        || token.eq_ignore_ascii_case("oo")
+        || token.eq_ignore_ascii_case("ooo")
     {
         return true;
     }
@@ -175,6 +180,13 @@ mod tests {
         assert!(is_move_candidate("o-o"));
         assert!(is_move_candidate("0-0"));
         assert!(is_move_candidate("0-0-0"));
+        // New castling notations
+        assert!(is_move_candidate("00"));
+        assert!(is_move_candidate("000"));
+        assert!(is_move_candidate("oo"));
+        assert!(is_move_candidate("OO"));
+        assert!(is_move_candidate("ooo"));
+        assert!(is_move_candidate("OOO"));
     }
 
     #[test]

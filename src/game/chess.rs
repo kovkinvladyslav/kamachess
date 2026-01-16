@@ -53,10 +53,12 @@ fn parse_san(board: &Board, input: &str) -> Result<ChessMove> {
     let s = input.trim();
     let side = board.side_to_move();
 
-    if s == "O-O" || s == "o-o" || s == "0-0" {
+    // Short castling
+    if s == "O-O" || s == "o-o" || s == "0-0" || s == "00" || s.eq_ignore_ascii_case("oo") {
         return parse_castling(board, side, false);
     }
-    if s == "O-O-O" || s == "o-o-o" || s == "0-0-0" {
+    // Long castling
+    if s == "O-O-O" || s == "o-o-o" || s == "0-0-0" || s == "000" || s.eq_ignore_ascii_case("ooo") {
         return parse_castling(board, side, true);
     }
 
@@ -235,6 +237,105 @@ pub fn uci_string(mv: ChessMove) -> String {
     uci
 }
 
+/// Convert a ChessMove to proper SAN (Standard Algebraic Notation)
+pub fn move_to_san(board: &Board, mv: ChessMove) -> String {
+    let piece = board.piece_on(mv.get_source()).unwrap_or(Piece::Pawn);
+    let dest = mv.get_dest();
+    let is_capture = board.piece_on(dest).is_some();
+
+    // Check for castling
+    if piece == Piece::King {
+        let source_file = mv.get_source().get_file();
+        let dest_file = dest.get_file();
+        if source_file == File::E {
+            if dest_file == File::G {
+                return "O-O".to_string();
+            } else if dest_file == File::C {
+                return "O-O-O".to_string();
+            }
+        }
+    }
+
+    let mut san = String::new();
+
+    // Add piece letter (except for pawns)
+    if piece != Piece::Pawn {
+        san.push(match piece {
+            Piece::King => 'K',
+            Piece::Queen => 'Q',
+            Piece::Rook => 'R',
+            Piece::Bishop => 'B',
+            Piece::Knight => 'N',
+            Piece::Pawn => unreachable!(),
+        });
+
+        // Add disambiguation if needed
+        let legal_moves: Vec<ChessMove> = MoveGen::new_legal(board)
+            .filter(|m| {
+                m.get_dest() == dest && board.piece_on(m.get_source()) == Some(piece) && *m != mv
+            })
+            .collect();
+
+        if !legal_moves.is_empty() {
+            let source_file = mv.get_source().get_file();
+            let source_rank = mv.get_source().get_rank();
+
+            // Check if file disambiguation is enough
+            let same_file = legal_moves
+                .iter()
+                .any(|m| m.get_source().get_file() == source_file);
+            let same_rank = legal_moves
+                .iter()
+                .any(|m| m.get_source().get_rank() == source_rank);
+
+            if !same_file {
+                san.push((b'a' + source_file.to_index() as u8) as char);
+            } else if !same_rank {
+                san.push_str(&(source_rank.to_index() + 1).to_string());
+            } else {
+                // Need both file and rank
+                san.push((b'a' + source_file.to_index() as u8) as char);
+                san.push_str(&(source_rank.to_index() + 1).to_string());
+            }
+        }
+    } else if is_capture {
+        // Pawn captures include the source file
+        san.push((b'a' + mv.get_source().get_file().to_index() as u8) as char);
+    }
+
+    // Add capture symbol
+    if is_capture {
+        san.push('x');
+    }
+
+    // Add destination square
+    san.push_str(&dest.to_string());
+
+    // Add promotion
+    if let Some(promo) = mv.get_promotion() {
+        san.push('=');
+        san.push(match promo {
+            Piece::Queen => 'Q',
+            Piece::Rook => 'R',
+            Piece::Bishop => 'B',
+            Piece::Knight => 'N',
+            Piece::Pawn | Piece::King => unreachable!(),
+        });
+    }
+
+    // Check if the move results in check or checkmate
+    let next_board = board.make_move_new(mv);
+    if *next_board.checkers() != chess::EMPTY {
+        if next_board.status() == chess::BoardStatus::Checkmate {
+            san.push('#');
+        } else {
+            san.push('+');
+        }
+    }
+
+    san
+}
+
 pub fn build_caption(
     header: &str,
     board: &Board,
@@ -252,19 +353,38 @@ pub fn build_caption(
     };
 
     let mut caption = format!(
-        "{}.\nWhite: {}\nBlack: {}\nTo move: {}",
+        "{}.
+White: {}
+Black: {}
+To move: {}",
         crate::utils::escape_html(header),
         white_name,
         black_name,
         side
     );
 
+    // Check if the current player is in check
+    if *board.checkers() != chess::EMPTY {
+        caption.push_str(
+            "
+⚠️ Check!",
+        );
+    }
+
     if let Some(advantage) = material_advantage(board, white, black) {
-        caption.push_str(&format!("\n{}", advantage));
+        caption.push_str(&format!(
+            "
+{}",
+            advantage
+        ));
     }
 
     if let Some(result) = result_line {
-        caption.push_str(&format!("\n{}", result));
+        caption.push_str(&format!(
+            "
+{}",
+            result
+        ));
     }
 
     caption

@@ -39,7 +39,11 @@ pub async fn handle_start_game(
     if white.id == black.id {
         state
             .telegram
-            .send_message(chat_id, message.message_id, "You cannot play against yourself.")
+            .send_message(
+                chat_id,
+                message.message_id,
+                "You cannot play against yourself.",
+            )
             .await?;
         return Ok(());
     }
@@ -61,14 +65,12 @@ pub async fn handle_start_game(
 
     let mut board = Board::default();
     let mut initial_move: Option<chess::ChessMove> = None;
-    let mut move_text: Option<String> = None;
 
     if let Some(candidate) = parsing::extract_move(text) {
         let before_fen = board.to_string();
         let mv = game::parse_move(&board, &candidate)?;
         board = board.make_move_new(mv);
         initial_move = Some(mv);
-        move_text = Some(candidate.clone());
         let uci = game::uci_string(mv);
         let after_fen = board.to_string();
         info!(
@@ -95,13 +97,14 @@ pub async fn handle_start_game(
     .await?;
 
     if let Some(mv) = initial_move {
+        let san = game::move_to_san(&Board::default(), mv);
         db::insert_move(
             &state.db,
             game_id,
             white.id,
             1,
             &game::uci_string(mv),
-            move_text.as_deref(),
+            Some(&san),
         )
         .await?;
     }
@@ -227,6 +230,7 @@ pub async fn handle_move(
         db::clear_draw_proposal(&state.db, game.id).await?;
     }
 
+    let san = game::move_to_san(&board, mv);
     let move_number = db::next_move_number(&state.db, game.id).await?;
     db::insert_move(
         &state.db,
@@ -234,7 +238,7 @@ pub async fn handle_move(
         player.id,
         move_number,
         &game::uci_string(mv),
-        Some(&candidate),
+        Some(&san),
     )
     .await?;
 
@@ -522,7 +526,9 @@ async fn send_board_update(
         board.side_to_move(),
         result_line,
     );
-    let image = game::render_board_png(board)?;
+    // Flip the board when it's Black's turn
+    let flip_board = board.side_to_move() == Color::Black;
+    let image = game::render_board_png(board, flip_board)?;
     state
         .telegram
         .send_photo(chat_id, reply_to, &caption, image)

@@ -16,8 +16,9 @@ const LIGHT_SQUARE: Rgba<u8> = Rgba([240, 217, 181, 255]);
 const DARK_SQUARE: Rgba<u8> = Rgba([181, 136, 99, 255]);
 const COORD_BORDER: Rgba<u8> = Rgba([101, 76, 59, 255]);
 
-pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
+pub fn render_board_png(board: &Board, flip_board: bool) -> Result<Vec<u8>> {
     let fen = board.to_string();
+    let flip_suffix = if flip_board { "_flipped" } else { "" };
     let safe_fen = fen.replace(['/', ' '], "_");
     let cache_dir = PathBuf::from(CACHE_DIR);
 
@@ -25,7 +26,7 @@ pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
         fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
     }
 
-    let file_path = cache_dir.join(format!("{}.png", safe_fen));
+    let file_path = cache_dir.join(format!("{}{}.png", safe_fen, flip_suffix));
 
     if file_path.exists() {
         let mut file = fs::File::open(&file_path).context("Failed to open cached image")?;
@@ -38,8 +39,8 @@ pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
         ImageBuffer::from_pixel(BOARD_SIZE, BOARD_SIZE, COORD_BORDER);
 
     draw_board_squares(&mut img);
-    draw_coordinates(&mut img);
-    draw_pieces(board, &mut img);
+    draw_coordinates(&mut img, flip_board);
+    draw_pieces(board, &mut img, flip_board);
 
     let mut bytes = Vec::new();
     img.write_to(
@@ -73,7 +74,7 @@ fn draw_board_squares(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
     }
 }
 
-fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) {
     let scale: i32 = 2;
     let file_glyph_w: i32 = 5 * scale;
     let file_glyph_h: i32 = 9 * scale;
@@ -92,14 +93,16 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
             let y0 = origin_y + (rank * SQUARE_SIZE) as i32;
 
             if rank == 0 {
-                let letter = (b'a' + file as u8) as char;
+                let file_idx = if flip_board { 7 - file } else { file };
+                let letter = (b'a' + file_idx as u8) as char;
                 let glyph = glyph_for_file(letter);
                 let x = x0 + (SQUARE_SIZE as i32 - file_glyph_w) / 2;
                 let y = (margin - file_glyph_h) / 2 + pad;
                 draw_glyph_file(img, x, y, label_color, &glyph, scale);
             }
             if rank == 7 {
-                let letter = (b'a' + file as u8) as char;
+                let file_idx = if flip_board { 7 - file } else { file };
+                let letter = (b'a' + file_idx as u8) as char;
                 let glyph = glyph_for_file(letter);
                 let x = x0 + (SQUARE_SIZE as i32 - file_glyph_w) / 2;
                 let y = origin_y + board_span + (margin - file_glyph_h) / 2 - pad;
@@ -107,14 +110,16 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
             }
 
             if file == 0 {
-                let number = (8 - rank) as u8;
+                let rank_num = if flip_board { rank + 1 } else { 8 - rank };
+                let number = rank_num as u8;
                 let glyph = glyph_for_rank(number);
                 let x = (margin - rank_glyph_w) / 2 + pad;
                 let y = y0 + (SQUARE_SIZE as i32 - rank_glyph_h) / 2;
                 draw_glyph_rank(img, x, y, label_color, &glyph, scale);
             }
             if file == 7 {
-                let number = (8 - rank) as u8;
+                let rank_num = if flip_board { rank + 1 } else { 8 - rank };
+                let number = rank_num as u8;
                 let glyph = glyph_for_rank(number);
                 let x = origin_x + board_span + (margin - rank_glyph_w) / 2 - pad;
                 let y = y0 + (SQUARE_SIZE as i32 - rank_glyph_h) / 2;
@@ -176,10 +181,12 @@ fn draw_glyph_rank(
     }
 }
 
-fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
+fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) {
     for rank in 0..8 {
         for file in 0..8 {
-            let square = square_from_coords(file, 7 - rank);
+            let board_rank = if flip_board { rank } else { 7 - rank };
+            let board_file = if flip_board { 7 - file } else { file };
+            let square = square_from_coords(board_file, board_rank);
             if let Some(piece) = board.piece_on(square) {
                 let color = board.color_on(square).unwrap_or(Color::White);
 
