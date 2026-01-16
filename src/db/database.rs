@@ -79,6 +79,19 @@ pub async fn upsert_user_by_username(pool: &Pool<Any>, username: &str) -> Result
     get_user_by_username(pool, username).await
 }
 
+fn row_to_db_user(row: &sqlx::any::AnyRow) -> DbUser {
+    DbUser {
+        id: row.get("id"),
+        telegram_id: row.get("telegram_id"),
+        username: row.get("username"),
+        first_name: row.get("first_name"),
+        last_name: row.get("last_name"),
+        wins: row.get("wins"),
+        losses: row.get("losses"),
+        draws: row.get("draws"),
+    }
+}
+
 pub async fn get_user_by_telegram_id(pool: &Pool<Any>, telegram_id: i64) -> Result<DbUser> {
     let row = sqlx::query(
         "SELECT id, telegram_id, username, first_name, last_name, wins, losses, draws
@@ -88,16 +101,7 @@ pub async fn get_user_by_telegram_id(pool: &Pool<Any>, telegram_id: i64) -> Resu
     .fetch_one(pool)
     .await?;
 
-    Ok(DbUser {
-        id: row.get("id"),
-        telegram_id: row.get("telegram_id"),
-        username: row.get("username"),
-        first_name: row.get("first_name"),
-        last_name: row.get("last_name"),
-        wins: row.get("wins"),
-        losses: row.get("losses"),
-        draws: row.get("draws"),
-    })
+    Ok(row_to_db_user(&row))
 }
 
 pub async fn get_user_by_username(pool: &Pool<Any>, username: &str) -> Result<DbUser> {
@@ -109,16 +113,7 @@ pub async fn get_user_by_username(pool: &Pool<Any>, username: &str) -> Result<Db
     .fetch_one(pool)
     .await?;
 
-    Ok(DbUser {
-        id: row.get("id"),
-        telegram_id: row.get("telegram_id"),
-        username: row.get("username"),
-        first_name: row.get("first_name"),
-        last_name: row.get("last_name"),
-        wins: row.get("wins"),
-        losses: row.get("losses"),
-        draws: row.get("draws"),
-    })
+    Ok(row_to_db_user(&row))
 }
 
 pub async fn get_user_by_id(pool: &Pool<Any>, id: i64) -> Result<DbUser> {
@@ -130,16 +125,7 @@ pub async fn get_user_by_id(pool: &Pool<Any>, id: i64) -> Result<DbUser> {
     .fetch_one(pool)
     .await?;
 
-    Ok(DbUser {
-        id: row.get("id"),
-        telegram_id: row.get("telegram_id"),
-        username: row.get("username"),
-        first_name: row.get("first_name"),
-        last_name: row.get("last_name"),
-        wins: row.get("wins"),
-        losses: row.get("losses"),
-        draws: row.get("draws"),
-    })
+    Ok(row_to_db_user(&row))
 }
 
 pub async fn create_game(
@@ -335,6 +321,34 @@ async fn get_games_san_moves(pool: &Pool<Any>, game_ids: &[i64]) -> HashMap<i64,
     result
 }
 
+fn format_history_lines(
+    history_rows: &[HistoryRow],
+    all_moves: &HashMap<i64, Vec<String>>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for row in history_rows {
+        let result = row.result.clone().unwrap_or_else(|| "ongoing".to_string());
+        let white_name = crate::utils::format_username(&row.white_username);
+        let black_name = crate::utils::format_username(&row.black_username);
+        let moves = all_moves.get(&row.id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let lichess_url = build_lichess_url_from_moves(moves);
+        lines.push(format!(
+            "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
+            row.local_num, white_name, black_name, result, lichess_url
+        ));
+    }
+    lines
+}
+
+fn format_history_output(lines: &[String]) -> String {
+    let mut output = lines.join("\n");
+    if lines.is_empty() {
+        output.push_str("No games yet.");
+    }
+    output.push_str("\nUse /history &lt;page&gt; for more.");
+    output
+}
+
 fn build_lichess_url_from_moves(moves: &[String]) -> String {
     if moves.is_empty() {
         return "https://lichess.org/analysis".to_string();
@@ -368,6 +382,21 @@ fn build_lichess_url_from_moves(moves: &[String]) -> String {
     format!("https://lichess.org/analysis/pgn/{}", encoded)
 }
 
+fn row_to_game_row(row: &sqlx::any::AnyRow) -> GameRow {
+    GameRow {
+        id: row.get("id"),
+        chat_id: row.get("chat_id"),
+        white_user_id: row.get("white_user_id"),
+        black_user_id: row.get("black_user_id"),
+        current_fen: row.get("current_fen"),
+        turn: row.get("turn"),
+        status: row.get("status"),
+        result: row.get("result"),
+        last_message_id: row.get("last_message_id"),
+        draw_proposed_by: row.get("draw_proposed_by"),
+    }
+}
+
 pub async fn find_ongoing_game(
     pool: &Pool<Any>,
     chat_id: i64,
@@ -388,18 +417,7 @@ pub async fn find_ongoing_game(
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| GameRow {
-        id: r.get("id"),
-        chat_id: r.get("chat_id"),
-        white_user_id: r.get("white_user_id"),
-        black_user_id: r.get("black_user_id"),
-        current_fen: r.get("current_fen"),
-        turn: r.get("turn"),
-        status: r.get("status"),
-        result: r.get("result"),
-        last_message_id: r.get("last_message_id"),
-        draw_proposed_by: r.get("draw_proposed_by"),
-    }))
+    Ok(row.map(|r| row_to_game_row(&r)))
 }
 
 pub async fn find_game_by_message(
@@ -418,18 +436,7 @@ pub async fn find_game_by_message(
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| GameRow {
-        id: r.get("id"),
-        chat_id: r.get("chat_id"),
-        white_user_id: r.get("white_user_id"),
-        black_user_id: r.get("black_user_id"),
-        current_fen: r.get("current_fen"),
-        turn: r.get("turn"),
-        status: r.get("status"),
-        result: r.get("result"),
-        last_message_id: r.get("last_message_id"),
-        draw_proposed_by: r.get("draw_proposed_by"),
-    }))
+    Ok(row.map(|r| row_to_game_row(&r)))
 }
 
 pub async fn format_user_history(
@@ -500,19 +507,7 @@ pub async fn format_user_history(
 
     let game_ids: Vec<i64> = history_rows.iter().map(|r| r.id).collect();
     let all_moves = get_games_san_moves(pool, &game_ids).await;
-
-    let mut lines = Vec::new();
-    for row in &history_rows {
-        let result = row.result.clone().unwrap_or_else(|| "ongoing".to_string());
-        let white_name = crate::utils::format_username(&row.white_username);
-        let black_name = crate::utils::format_username(&row.black_username);
-        let moves = all_moves.get(&row.id).map(|v| v.as_slice()).unwrap_or(&[]);
-        let lichess_url = build_lichess_url_from_moves(moves);
-        lines.push(format!(
-            "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
-            row.local_num, white_name, black_name, result, lichess_url
-        ));
-    }
+    let lines = format_history_lines(&history_rows, &all_moves);
 
     let mut output = format!(
         "History for {} in this chat.\nWins: {}, Losses: {}, Draws: {}, Win%: {:.1}\n\n",
@@ -522,11 +517,7 @@ pub async fn format_user_history(
         draws,
         win_pct
     );
-    output.push_str(&lines.join("\n"));
-    if lines.is_empty() {
-        output.push_str("No games yet.");
-    }
-    output.push_str("\nUse /history &lt;page&gt; for more.");
+    output.push_str(&format_history_output(&lines));
     Ok(output)
 }
 
@@ -578,19 +569,7 @@ pub async fn format_head_to_head(
 
     let game_ids: Vec<i64> = history_rows.iter().map(|r| r.id).collect();
     let all_moves = get_games_san_moves(pool, &game_ids).await;
-
-    let mut lines = Vec::new();
-    for row in &history_rows {
-        let result = row.result.clone().unwrap_or_else(|| "ongoing".to_string());
-        let white_name = crate::utils::format_username(&row.white_username);
-        let black_name = crate::utils::format_username(&row.black_username);
-        let moves = all_moves.get(&row.id).map(|v| v.as_slice()).unwrap_or(&[]);
-        let lichess_url = build_lichess_url_from_moves(moves);
-        lines.push(format!(
-            "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
-            row.local_num, white_name, black_name, result, lichess_url
-        ));
-    }
+    let lines = format_history_lines(&history_rows, &all_moves);
 
     let mut output = format!(
         "Head-to-head {} vs {} in this chat. Total games: {}\n\n",
@@ -598,10 +577,6 @@ pub async fn format_head_to_head(
         crate::utils::escape_html(&user_b.display_name()),
         total
     );
-    output.push_str(&lines.join("\n"));
-    if lines.is_empty() {
-        output.push_str("No games yet.");
-    }
-    output.push_str("\nUse /history &lt;page&gt; for more.");
+    output.push_str(&format_history_output(&lines));
     Ok(output)
 }

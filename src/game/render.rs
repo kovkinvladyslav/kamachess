@@ -106,6 +106,45 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) 
     }
 }
 
+fn draw_scaled_pixel(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    base_x: i32,
+    base_y: i32,
+    col: usize,
+    row: usize,
+    scale: i32,
+    color: Rgba<u8>,
+) {
+    for dy in 0..scale {
+        for dx in 0..scale {
+            let px = base_x + (col as i32 * scale) + dx;
+            let py = base_y + (row as i32 * scale) + dy;
+            if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32 {
+                img.put_pixel(px as u32, py as u32, color);
+            }
+        }
+    }
+}
+
+fn draw_glyph(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    x: i32,
+    y: i32,
+    color: Rgba<u8>,
+    glyph: &[u8],
+    width: usize,
+    bit_shift: usize,
+    scale: i32,
+) {
+    for (row, bits) in glyph.iter().enumerate() {
+        for col in 0..width {
+            if (bits >> (bit_shift - col)) & 1 == 1 {
+                draw_scaled_pixel(img, x, y, col, row, scale, color);
+            }
+        }
+    }
+}
+
 fn draw_glyph_file(
     img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     x: i32,
@@ -114,22 +153,7 @@ fn draw_glyph_file(
     glyph: &[u8; 9],
     scale: i32,
 ) {
-    for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..5 {
-            if (bits >> (4 - col)) & 1 == 1 {
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = x + col * scale + dx;
-                        let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
-                        {
-                            img.put_pixel(px as u32, py as u32, color);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    draw_glyph(img, x, y, color, glyph, 5, 4, scale);
 }
 
 fn draw_glyph_rank(
@@ -140,22 +164,7 @@ fn draw_glyph_rank(
     glyph: &[u8; 7],
     scale: i32,
 ) {
-    for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..7 {
-            if (bits >> (6 - col)) & 1 == 1 {
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = x + col * scale + dx;
-                        let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
-                        {
-                            img.put_pixel(px as u32, py as u32, color);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    draw_glyph(img, x, y, color, glyph, 7, 6, scale);
 }
 
 fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) {
@@ -193,6 +202,24 @@ fn square_from_coords(file: u32, rank: u32) -> Square {
     Square::make_square(r, f)
 }
 
+fn draw_piece_pattern_pixels(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    pattern: &[u16; 16],
+    x: i32,
+    y: i32,
+    color: Rgba<u8>,
+    scale: i32,
+    should_draw: impl Fn(usize, usize, &[u16; 16]) -> bool,
+) {
+    for row in 0..16 {
+        for col in 0..16 {
+            if should_draw(row, col, pattern) {
+                draw_scaled_pixel(img, x, y, col, row, scale, color);
+            }
+        }
+    }
+}
+
 fn draw_piece(
     img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     piece: Piece,
@@ -202,22 +229,9 @@ fn draw_piece(
 ) {
     let pattern = piece_pattern(piece);
     let scale = 3;
-    for (row, bits) in pattern.iter().enumerate() {
-        for col in 0..16 {
-            if (bits >> (15 - col)) & 1 == 1 {
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = x + col * scale + dx;
-                        let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
-                        {
-                            img.put_pixel(px as u32, py as u32, color);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    draw_piece_pattern_pixels(img, &pattern, x, y, color, scale, |_row, col, pattern| {
+        (pattern[_row] >> (15 - col)) & 1 == 1
+    });
 }
 
 fn draw_piece_outline(
@@ -229,29 +243,15 @@ fn draw_piece_outline(
 ) {
     let pattern = piece_pattern(piece);
     let scale = 3;
-    for (row, bits) in pattern.iter().enumerate() {
-        for col in 0..16 {
-            let is_filled = (bits >> (15 - col)) & 1 == 1;
-            if !is_filled {
-                continue;
-            }
-            let left = col > 0 && (bits >> (15 - col + 1)) & 1 == 0;
-            let right = col < 15 && (bits >> (15 - col - 1)) & 1 == 0;
-            let up = row > 0 && (pattern[row - 1] >> (15 - col)) & 1 == 0;
-            let down = row < 15 && (pattern[row + 1] >> (15 - col)) & 1 == 0;
-
-            if left || right || up || down {
-                for dy in 0..scale {
-                    for dx in 0..scale {
-                        let px = x + col * scale + dx;
-                        let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
-                        {
-                            img.put_pixel(px as u32, py as u32, color);
-                        }
-                    }
-                }
-            }
+    draw_piece_pattern_pixels(img, &pattern, x, y, color, scale, |row, col, pattern| {
+        let is_filled = (pattern[row] >> (15 - col)) & 1 == 1;
+        if !is_filled {
+            return false;
         }
-    }
+        let left = col > 0 && (pattern[row] >> (15 - col + 1)) & 1 == 0;
+        let right = col < 15 && (pattern[row] >> (15 - col - 1)) & 1 == 0;
+        let up = row > 0 && (pattern[row - 1] >> (15 - col)) & 1 == 0;
+        let down = row < 15 && (pattern[row + 1] >> (15 - col)) & 1 == 0;
+        left || right || up || down
+    });
 }
