@@ -2,29 +2,18 @@
 
 A Telegram chess bot written in Rust.
 
-## Setup
+![Game Screenshot](screenshots/game.png)
 
-1.  **Clone and Build**:
-    ```bash
-    git clone https://github.com/youruser/kamachess
-    cd kamachess
-    cargo build --release
-    ```
+## Features
 
-2.  **Configuration**:
-    Create `.env`:
-    ```ini
-    TELEGRAM_BOT_TOKEN=your_token
-    TELEGRAM_BOT_USERNAME=your_bot_username
-    DATABASE_URL=sqlite://kamachess.db?mode=rwc
-    LOG_DIR=logs
-    RUST_LOG=info
-    ```
+Kamachess allows you to play chess directly in your Telegram group chats. It supports standard chess rules, move validation, and procedurally generated board images using high-quality bitmap assets.
 
-3.  **Run**:
-    ```bash
-    cargo run --release
-    ```
+*   **Move Validation**: Enforces legal moves, castling, promotion, and en passant.
+*   **Board Rendering**: Procedurally generates board images using bitmap assets (cached for performance).
+*   **Stats**: Tracks wins/losses/draws per chat.
+
+    ![History Screenshot](screenshots/history.png)
+*   **Database**: SQLite (default) or PostgreSQL.
 
 ## Usage
 
@@ -41,18 +30,33 @@ A Telegram chess bot written in Rust.
 
 **Playing**: Reply to the bot's board message with your move in algebraic notation (e.g., `e4`, `Nf3`, `O-O`).
 
-## Features
+## Deployment
 
-*   **Move Validation**: Enforces legal moves, castling, promotion, and en passant.
-*   **Board Support**: Generates board images locally (cached).
-*   **Stats**: Tracks wins/losses/draws per chat.
-*   **Database**: SQLite (default) or PostgreSQL.
+### Local Development
+1.  Setup `.env` (see below).
+2.  `cargo run --release`
 
-## Technical Details
+### Production with Docker
+For a robust production environment using PostgreSQL:
 
-*   **Language**: Rust
-*   **Crates**: `chess`, `sqlx`, `image`, `tokio`, `teloxide` (or `reqwest` for API).
-*   **Rendering**: Procedural generation using bitmap assets.
+1.  **Configure Environment**:
+    Create a `.env` file in the project root:
+    ```ini
+    TELEGRAM_BOT_TOKEN=ur_token
+    TELEGRAM_BOT_USERNAME=ur_bot_name
+    # DATABASE_URL is handled automatically by docker-compose
+    ```
+
+2.  **Start Services**:
+    ```bash
+    docker-compose up -d
+    ```
+    This starts a PostgreSQL container and the bot container. The database schema is applied automatically on startup.
+
+3.  **View Logs**:
+    ```bash
+    docker-compose logs -f
+    ```
 
 ## License
 
