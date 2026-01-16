@@ -11,7 +11,7 @@ const BOARD_SIZE: u32 = SQUARE_SIZE * 8 + COORD_MARGIN * 2;
 
 const LIGHT_SQUARE: Rgba<u8> = Rgba([240, 217, 181, 255]);
 const DARK_SQUARE: Rgba<u8> = Rgba([181, 136, 99, 255]);
-const COORD_BORDER: Rgba<u8> = Rgba([101, 76, 59, 255]); // Dark brown
+const COORD_BORDER: Rgba<u8> = Rgba([101, 76, 59, 255]);
 
 pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
     let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> =
@@ -26,7 +26,7 @@ pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
         &mut std::io::Cursor::new(&mut bytes),
         image::ImageFormat::Png,
     )?;
-    
+
     Ok(bytes)
 }
 
@@ -39,7 +39,7 @@ fn draw_board_squares(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
             let y0 = origin_y + rank * SQUARE_SIZE;
             let is_light = (rank + file) % 2 == 0;
             let color = if is_light { LIGHT_SQUARE } else { DARK_SQUARE };
-            
+
             for y in y0..(y0 + SQUARE_SIZE) {
                 for x in x0..(x0 + SQUARE_SIZE) {
                     img.put_pixel(x, y, color);
@@ -60,14 +60,13 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
     let origin_y = COORD_MARGIN as i32;
     let margin = COORD_MARGIN as i32;
     let board_span = (SQUARE_SIZE * 8) as i32;
-    let label_color = Rgba([220, 200, 180, 255]); // Light tan for contrast on dark border
+    let label_color = Rgba([220, 200, 180, 255]);
 
     for rank in 0..8 {
         for file in 0..8 {
             let x0 = origin_x + (file * SQUARE_SIZE) as i32;
             let y0 = origin_y + (rank * SQUARE_SIZE) as i32;
 
-            // File labels on top/bottom margins
             if rank == 0 {
                 let letter = (b'a' + file as u8) as char;
                 let glyph = glyph_for_file(letter);
@@ -83,7 +82,6 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
                 draw_glyph_file(img, x, y, label_color, &glyph, scale);
             }
 
-            // Rank labels on left/right margins
             if file == 0 {
                 let number = (8 - rank) as u8;
                 let glyph = glyph_for_rank(number);
@@ -115,12 +113,9 @@ fn draw_glyph_file(
             if (bits >> (4 - col)) & 1 == 1 {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        let px = x + (col as i32 * scale) + dx;
+                        let px = x + col * scale + dx;
                         let py = y + (row as i32 * scale) + dy;
-                        if px >= 0
-                            && py >= 0
-                            && px < img.width() as i32
-                            && py < img.height() as i32
+                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
                         {
                             img.put_pixel(px as u32, py as u32, color);
                         }
@@ -144,12 +139,9 @@ fn draw_glyph_rank(
             if (bits >> (6 - col)) & 1 == 1 {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        let px = x + (col as i32 * scale) + dx;
+                        let px = x + col * scale + dx;
                         let py = y + (row as i32 * scale) + dy;
-                        if px >= 0
-                            && py >= 0
-                            && px < img.width() as i32
-                            && py < img.height() as i32
+                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
                         {
                             img.put_pixel(px as u32, py as u32, color);
                         }
@@ -160,31 +152,25 @@ fn draw_glyph_rank(
     }
 }
 
-fn draw_pieces(
-    board: &Board,
-    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
-) -> Result<()> {
+fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<()> {
     for rank in 0..8 {
         for file in 0..8 {
             let square = square_from_coords(file, 7 - rank)?;
             if let Some(piece) = board.piece_on(square) {
                 let color = board.color_on(square).unwrap_or(Color::White);
-                
+
                 let x = (COORD_MARGIN + file * SQUARE_SIZE + 8) as i32;
                 let y = (COORD_MARGIN + rank * SQUARE_SIZE + 8) as i32;
-                
-                // Draw shadow
+
                 draw_piece(img, piece, x + 2, y + 2, Rgba([60, 60, 60, 200]));
-                
-                // Draw piece
+
                 let piece_color = if color == Color::White {
                     Rgba([255, 255, 255, 255])
                 } else {
                     Rgba([40, 40, 40, 255])
                 };
                 draw_piece(img, piece, x, y, piece_color);
-                
-                // Draw outline for white pieces (better visibility)
+
                 if color == Color::White {
                     draw_piece_outline(img, piece, x, y, Rgba([60, 60, 60, 255]));
                 }
@@ -215,9 +201,10 @@ fn draw_piece(
             if (bits >> (15 - col)) & 1 == 1 {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        let px = x + (col as i32 * scale) + dx;
+                        let px = x + col * scale + dx;
                         let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32 {
+                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
+                        {
                             img.put_pixel(px as u32, py as u32, color);
                         }
                     }
@@ -242,18 +229,18 @@ fn draw_piece_outline(
             if !is_filled {
                 continue;
             }
-            // Check if this is an edge pixel
             let left = col > 0 && (bits >> (15 - col + 1)) & 1 == 0;
             let right = col < 15 && (bits >> (15 - col - 1)) & 1 == 0;
             let up = row > 0 && (pattern[row - 1] >> (15 - col)) & 1 == 0;
             let down = row < 15 && (pattern[row + 1] >> (15 - col)) & 1 == 0;
-            
+
             if left || right || up || down {
                 for dy in 0..scale {
                     for dx in 0..scale {
-                        let px = x + (col as i32 * scale) + dx;
+                        let px = x + col * scale + dx;
                         let py = y + (row as i32 * scale) + dy;
-                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32 {
+                        if px >= 0 && py >= 0 && px < img.width() as i32 && py < img.height() as i32
+                        {
                             img.put_pixel(px as u32, py as u32, color);
                         }
                     }
@@ -262,4 +249,3 @@ fn draw_piece_outline(
         }
     }
 }
-

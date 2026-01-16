@@ -1,9 +1,9 @@
+use crate::models::{DbUser, GameRow, HistoryRow, User};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
-use crate::models::{DbUser, GameRow, HistoryRow, User};
 
 const INIT_SQL: &str = include_str!("../../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../../migrations/002_add_draw_proposed_by.sql");
@@ -11,7 +11,6 @@ const MIGRATION_002: &str = include_str!("../../migrations/002_add_draw_proposed
 pub fn init_db(pool: &Pool<SqliteConnectionManager>) -> Result<()> {
     let conn = pool.get()?;
     conn.execute_batch(INIT_SQL)?;
-    // Try to apply migration 002 (idempotent - fails silently if column already exists)
     let _ = conn.execute_batch(MIGRATION_002);
     Ok(())
 }
@@ -53,7 +52,7 @@ pub fn get_user_by_telegram_id(conn: &rusqlite::Connection, telegram_id: i64) ->
         "SELECT id, telegram_id, username, first_name, last_name, wins, losses, draws
          FROM users WHERE telegram_id = ?1",
         params![telegram_id],
-        |row| DbUser::from_row(row),
+        DbUser::from_row,
     )
     .map_err(|err| anyhow!(err))
 }
@@ -63,7 +62,7 @@ pub fn get_user_by_username(conn: &rusqlite::Connection, username: &str) -> Resu
         "SELECT id, telegram_id, username, first_name, last_name, wins, losses, draws
          FROM users WHERE username = ?1",
         params![username],
-        |row| DbUser::from_row(row),
+        DbUser::from_row,
     )
     .map_err(|err| anyhow!(err))
 }
@@ -73,7 +72,7 @@ pub fn get_user_by_id(conn: &rusqlite::Connection, id: i64) -> Result<DbUser> {
         "SELECT id, telegram_id, username, first_name, last_name, wins, losses, draws
          FROM users WHERE id = ?1",
         params![id],
-        |row| DbUser::from_row(row),
+        DbUser::from_row,
     )
     .map_err(|err| anyhow!(err))
 }
@@ -95,7 +94,11 @@ pub fn create_game(
     Ok(conn.last_insert_rowid())
 }
 
-pub fn update_game_message(conn: &rusqlite::Connection, game_id: i64, message_id: i64) -> Result<()> {
+pub fn update_game_message(
+    conn: &rusqlite::Connection,
+    game_id: i64,
+    message_id: i64,
+) -> Result<()> {
     conn.execute(
         "UPDATE games SET last_message_id = ?1 WHERE id = ?2",
         params![message_id, game_id],
@@ -103,7 +106,12 @@ pub fn update_game_message(conn: &rusqlite::Connection, game_id: i64, message_id
     Ok(())
 }
 
-pub fn update_game_fen(conn: &rusqlite::Connection, game_id: i64, fen: &str, turn: &str) -> Result<()> {
+pub fn update_game_fen(
+    conn: &rusqlite::Connection,
+    game_id: i64,
+    fen: &str,
+    turn: &str,
+) -> Result<()> {
     conn.execute(
         "UPDATE games SET current_fen = ?1, turn = ?2 WHERE id = ?3",
         params![fen, turn, game_id],
@@ -149,16 +157,34 @@ pub fn update_player_stats(
 ) -> Result<()> {
     match result {
         "1-0" => {
-            conn.execute("UPDATE users SET wins = wins + 1 WHERE id = ?1", params![white_id])?;
-            conn.execute("UPDATE users SET losses = losses + 1 WHERE id = ?1", params![black_id])?;
+            conn.execute(
+                "UPDATE users SET wins = wins + 1 WHERE id = ?1",
+                params![white_id],
+            )?;
+            conn.execute(
+                "UPDATE users SET losses = losses + 1 WHERE id = ?1",
+                params![black_id],
+            )?;
         }
         "0-1" => {
-            conn.execute("UPDATE users SET wins = wins + 1 WHERE id = ?1", params![black_id])?;
-            conn.execute("UPDATE users SET losses = losses + 1 WHERE id = ?1", params![white_id])?;
+            conn.execute(
+                "UPDATE users SET wins = wins + 1 WHERE id = ?1",
+                params![black_id],
+            )?;
+            conn.execute(
+                "UPDATE users SET losses = losses + 1 WHERE id = ?1",
+                params![white_id],
+            )?;
         }
         "1/2-1/2" => {
-            conn.execute("UPDATE users SET draws = draws + 1 WHERE id = ?1", params![white_id])?;
-            conn.execute("UPDATE users SET draws = draws + 1 WHERE id = ?1", params![black_id])?;
+            conn.execute(
+                "UPDATE users SET draws = draws + 1 WHERE id = ?1",
+                params![white_id],
+            )?;
+            conn.execute(
+                "UPDATE users SET draws = draws + 1 WHERE id = ?1",
+                params![black_id],
+            )?;
         }
         _ => {}
     }
@@ -194,6 +220,58 @@ pub fn next_move_number(conn: &rusqlite::Connection, game_id: i64) -> Result<i64
     .map_err(|err| anyhow!(err))
 }
 
+fn get_game_san_moves(conn: &rusqlite::Connection, game_id: i64) -> Vec<String> {
+    let mut stmt = match conn
+        .prepare("SELECT san, uci FROM moves WHERE game_id = ?1 ORDER BY move_number ASC")
+    {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    stmt.query_map(params![game_id], |row| {
+        let san: Option<String> = row.get(0)?;
+        let uci: String = row.get(1)?;
+        Ok(san.unwrap_or(uci))
+    })
+    .ok()
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+fn build_lichess_url(conn: &rusqlite::Connection, game_id: i64) -> String {
+    let moves = get_game_san_moves(conn, game_id);
+    if moves.is_empty() {
+        return "https://lichess.org/analysis".to_string();
+    }
+
+    let mut pgn = String::new();
+    for (i, mv) in moves.iter().enumerate() {
+        if i % 2 == 0 {
+            if !pgn.is_empty() {
+                pgn.push(' ');
+            }
+            pgn.push_str(&format!("{}.", i / 2 + 1));
+        }
+        pgn.push(' ');
+        pgn.push_str(mv);
+    }
+
+    let encoded: String = pgn
+        .chars()
+        .map(|c| match c {
+            ' ' => "%20".to_string(),
+            '.' => ".".to_string(),
+            '#' => "%23".to_string(),
+            '+' => "%2B".to_string(),
+            '=' => "%3D".to_string(),
+            _ if c.is_ascii_alphanumeric() || c == '-' => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect();
+
+    format!("https://lichess.org/analysis/pgn/{}", encoded)
+}
+
 pub fn find_ongoing_game(
     conn: &rusqlite::Connection,
     chat_id: i64,
@@ -208,7 +286,7 @@ pub fn find_ongoing_game(
              OR (white_user_id = ?3 AND black_user_id = ?2))
          LIMIT 1",
         params![chat_id, white_id, black_id],
-        |row| GameRow::from_row(row),
+        GameRow::from_row,
     )
     .optional()
     .map_err(|err| anyhow!(err))
@@ -225,7 +303,7 @@ pub fn find_game_by_message(
          WHERE chat_id = ?1 AND last_message_id = ?2
          LIMIT 1",
         params![chat_id, message_id],
-        |row| GameRow::from_row(row),
+        GameRow::from_row,
     )
     .optional()
     .map_err(|err| anyhow!(err))
@@ -276,22 +354,28 @@ pub fn format_user_history(
     let limit = 10;
     let offset = ((page - 1) * limit) as i64;
     let mut stmt = conn.prepare(
-        "SELECT g.id, g.started_at, g.result, u1.username, u2.username
-         FROM games g
-         JOIN users u1 ON g.white_user_id = u1.id
-         JOIN users u2 ON g.black_user_id = u2.id
-         WHERE g.chat_id = ?1
-           AND (g.white_user_id = ?2 OR g.black_user_id = ?2)
-         ORDER BY g.started_at DESC
-         LIMIT ?3 OFFSET ?4",
+        "WITH numbered AS (
+            SELECT g.id, g.started_at, g.result, u1.username AS white_username, u2.username AS black_username,
+                   ROW_NUMBER() OVER (ORDER BY g.started_at ASC) AS local_num
+            FROM games g
+            JOIN users u1 ON g.white_user_id = u1.id
+            JOIN users u2 ON g.black_user_id = u2.id
+            WHERE g.chat_id = ?1
+              AND (g.white_user_id = ?2 OR g.black_user_id = ?2)
+        )
+        SELECT id, local_num, started_at, result, white_username, black_username
+        FROM numbered
+        ORDER BY started_at DESC
+        LIMIT ?3 OFFSET ?4",
     )?;
     let rows = stmt.query_map(params![chat_id, user.id, limit, offset], |row| {
         Ok(HistoryRow {
             id: row.get(0)?,
-            started_at: row.get(1)?,
-            result: row.get::<_, Option<String>>(2)?,
-            white_username: row.get(3)?,
-            black_username: row.get(4)?,
+            local_num: row.get(1)?,
+            started_at: row.get(2)?,
+            result: row.get::<_, Option<String>>(3)?,
+            white_username: row.get(4)?,
+            black_username: row.get(5)?,
         })
     })?;
 
@@ -301,14 +385,15 @@ pub fn format_user_history(
         let result = row.result.unwrap_or_else(|| "ongoing".to_string());
         let white_name = crate::utils::format_username(&row.white_username);
         let black_name = crate::utils::format_username(&row.black_username);
+        let lichess_url = build_lichess_url(conn, row.id);
         lines.push(format!(
-            "Game {}: {} vs {} ({})",
-            row.id, white_name, black_name, result
+            "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
+            row.local_num, white_name, black_name, result, lichess_url
         ));
     }
 
     let mut output = format!(
-        "History for {} in this chat.\nWins: {}, Losses: {}, Draws: {}, Win%: {:.1}\n",
+        "History for {} in this chat.\nWins: {}, Losses: {}, Draws: {}, Win%: {:.1}\n\n",
         crate::utils::escape_html(&user.display_name()),
         wins,
         losses,
@@ -336,31 +421,39 @@ pub fn format_head_to_head(
            AND ((white_user_id = ?1 AND black_user_id = ?2)
              OR (white_user_id = ?2 AND black_user_id = ?1))",
     )?;
-    let total: i64 =
-        stmt.query_row(params![user_a.id, user_b.id, chat_id], |row| row.get(0))?;
+    let total: i64 = stmt.query_row(params![user_a.id, user_b.id, chat_id], |row| row.get(0))?;
 
     let limit = 10;
     let offset = ((page - 1) * limit) as i64;
     let mut stmt = conn.prepare(
-        "SELECT g.id, g.started_at, g.result, u1.username, u2.username
-         FROM games g
-         JOIN users u1 ON g.white_user_id = u1.id
-         JOIN users u2 ON g.black_user_id = u2.id
-         WHERE g.chat_id = ?3
-           AND ((g.white_user_id = ?1 AND g.black_user_id = ?2)
-             OR (g.white_user_id = ?2 AND g.black_user_id = ?1))
-         ORDER BY g.started_at DESC
-         LIMIT ?4 OFFSET ?5",
+        "WITH numbered AS (
+            SELECT g.id, g.started_at, g.result, u1.username AS white_username, u2.username AS black_username,
+                   ROW_NUMBER() OVER (ORDER BY g.started_at ASC) AS local_num
+            FROM games g
+            JOIN users u1 ON g.white_user_id = u1.id
+            JOIN users u2 ON g.black_user_id = u2.id
+            WHERE g.chat_id = ?3
+              AND ((g.white_user_id = ?1 AND g.black_user_id = ?2)
+                OR (g.white_user_id = ?2 AND g.black_user_id = ?1))
+        )
+        SELECT id, local_num, started_at, result, white_username, black_username
+        FROM numbered
+        ORDER BY started_at DESC
+        LIMIT ?4 OFFSET ?5",
     )?;
-    let rows = stmt.query_map(params![user_a.id, user_b.id, chat_id, limit, offset], |row| {
-        Ok(HistoryRow {
-            id: row.get(0)?,
-            started_at: row.get(1)?,
-            result: row.get::<_, Option<String>>(2)?,
-            white_username: row.get(3)?,
-            black_username: row.get(4)?,
-        })
-    })?;
+    let rows = stmt.query_map(
+        params![user_a.id, user_b.id, chat_id, limit, offset],
+        |row| {
+            Ok(HistoryRow {
+                id: row.get(0)?,
+                local_num: row.get(1)?,
+                started_at: row.get(2)?,
+                result: row.get::<_, Option<String>>(3)?,
+                white_username: row.get(4)?,
+                black_username: row.get(5)?,
+            })
+        },
+    )?;
 
     let mut lines = Vec::new();
     for row in rows {
@@ -368,14 +461,15 @@ pub fn format_head_to_head(
         let result = row.result.unwrap_or_else(|| "ongoing".to_string());
         let white_name = crate::utils::format_username(&row.white_username);
         let black_name = crate::utils::format_username(&row.black_username);
+        let lichess_url = build_lichess_url(conn, row.id);
         lines.push(format!(
-            "Game {}: {} vs {} ({})",
-            row.id, white_name, black_name, result
+            "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
+            row.local_num, white_name, black_name, result, lichess_url
         ));
     }
 
     let mut output = format!(
-        "Head-to-head {} vs {} in this chat. Total games: {}\n",
+        "Head-to-head {} vs {} in this chat. Total games: {}\n\n",
         crate::utils::escape_html(&user_a.display_name()),
         crate::utils::escape_html(&user_b.display_name()),
         total
