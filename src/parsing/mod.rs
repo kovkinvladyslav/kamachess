@@ -54,9 +54,11 @@ fn is_move_candidate(token: &str) -> bool {
         return false;
     }
 
-    // Handle castling notation
-    let upper = token.to_uppercase();
-    if upper == "O-O" || upper == "O-O-O" || upper == "0-0" || upper == "0-0-0" {
+    if token.eq_ignore_ascii_case("O-O")
+        || token.eq_ignore_ascii_case("O-O-O")
+        || token == "0-0"
+        || token == "0-0-0"
+    {
         return true;
     }
 
@@ -194,5 +196,52 @@ mod tests {
         );
         assert!(extract_usernames("no usernames here").is_empty());
         assert!(extract_usernames("/start e4").is_empty());
+    }
+
+    #[test]
+    fn test_extract_username_with_move() {
+        assert_eq!(
+            extract_usernames("/start @opponent Nf3"),
+            vec!["opponent".to_string()]
+        );
+        assert_eq!(extract_move("/start @opponent Nf3"), Some("Nf3".to_string()));
+    }
+
+    #[test]
+    fn test_start_command_variations() {
+        assert_eq!(extract_move("/start"), None);
+        assert_eq!(extract_move("/start @user"), None);
+        assert_eq!(extract_move("/start e4"), Some("e4".to_string()));
+        assert_eq!(extract_move("/start @user e4"), Some("e4".to_string()));
+        assert_eq!(extract_move("/start @user Nf3"), Some("Nf3".to_string()));
+        assert_eq!(extract_move("/start @user e2e4"), Some("e2e4".to_string()));
+        assert_eq!(extract_move("/start @user O-O"), Some("O-O".to_string()));
+    }
+
+    #[test]
+    fn test_username_edge_cases() {
+        assert_eq!(extract_usernames("@user_name"), vec!["user_name".to_string()]);
+        assert_eq!(extract_usernames("@User123"), vec!["User123".to_string()]);
+        assert_eq!(extract_usernames("@"), Vec::<String>::new());
+        assert_eq!(extract_usernames("@ "), Vec::<String>::new());
+        assert_eq!(extract_usernames("@@double"), vec!["double".to_string()]);
+    }
+
+    #[test]
+    fn test_ambiguous_username_move() {
+        let text = "/start @e4";
+        let usernames = extract_usernames(text);
+        let mv = extract_move(text);
+        assert_eq!(usernames, vec!["e4".to_string()]);
+        assert_eq!(mv, Some("e4".to_string()));
+    }
+
+    #[test]
+    fn test_username_takes_priority_over_move() {
+        let text = "/start @player";
+        let usernames = extract_usernames(text);
+        let mv = extract_move(text);
+        assert_eq!(usernames, vec!["player".to_string()]);
+        assert_eq!(mv, None);
     }
 }
