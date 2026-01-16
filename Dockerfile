@@ -11,14 +11,7 @@ RUN apt-get update && apt-get install -y \
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
 
-# Create dummy src to cache dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    echo "pub fn dummy() {}" > src/lib.rs
 
-# Build dependencies (this layer is cached)
-RUN cargo build --release --features postgres --no-default-features && \
-    rm -rf src target/release/deps/kamachess*
 
 # Copy actual source code
 COPY src ./src
