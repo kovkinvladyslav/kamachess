@@ -19,6 +19,11 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
         ))
         .execute(pool)
         .await;
+        let _ = sqlx::raw_sql(include_str!(
+            "../../migrations/postgres/004_add_draw_proposal_message_id.sql"
+        ))
+        .execute(pool)
+        .await;
     } else {
         sqlx::raw_sql(include_str!("../../migrations/sqlite/001_init.sql"))
             .execute(pool)
@@ -33,15 +38,17 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
         ))
         .execute(pool)
         .await;
+        let _ = sqlx::raw_sql(include_str!(
+            "../../migrations/sqlite/004_add_draw_proposal_message_id.sql"
+        ))
+        .execute(pool)
+        .await;
     }
     Ok(())
 }
 
 pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
     if let Some(username) = user.username.as_deref() {
-        // 1. Check if there's a placeholder user (telegram_id IS NULL) with this username.
-        // If so, update that user's telegram_id instead of creating a new one.
-        // This ensures games started with usernames can be continued by the actual user.
         let updated = sqlx::query(
             "UPDATE users SET telegram_id = $1, first_name = $2, last_name = $3
              WHERE username = $4 AND telegram_id IS NULL",
@@ -58,8 +65,6 @@ pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
             return get_user_by_telegram_id(pool, user.id).await;
         }
 
-        // 2. Clear this username from any *other* user to prevent UNIQUE constraint violation.
-        // This handles the case where another user (or a stale record with different ID) holds the username.
         sqlx::query("UPDATE users SET username = NULL WHERE username = $1 AND telegram_id != $2")
             .bind(username)
             .bind(user.id)
@@ -67,8 +72,6 @@ pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
             .await?;
     }
 
-    // 3. Now we can safely upsert the user.
-    // The username is now free (except possibly on our own row, which is fine).
     sqlx::query(
         "INSERT INTO users (telegram_id, username, first_name, last_name)
          VALUES ($1, $2, $3, $4)
@@ -211,9 +214,10 @@ pub async fn update_game_result(
     Ok(())
 }
 
-pub async fn propose_draw(pool: &Pool<Any>, game_id: i64, player_id: i64) -> Result<()> {
-    sqlx::query("UPDATE games SET draw_proposed_by = $1 WHERE id = $2")
+pub async fn propose_draw(pool: &Pool<Any>, game_id: i64, player_id: i64, message_id: i64) -> Result<()> {
+    sqlx::query("UPDATE games SET draw_proposed_by = $1, draw_proposal_message_id = $2 WHERE id = $3")
         .bind(player_id)
+        .bind(message_id)
         .bind(game_id)
         .execute(pool)
         .await?;
@@ -221,7 +225,7 @@ pub async fn propose_draw(pool: &Pool<Any>, game_id: i64, player_id: i64) -> Res
 }
 
 pub async fn clear_draw_proposal(pool: &Pool<Any>, game_id: i64) -> Result<()> {
-    sqlx::query("UPDATE games SET draw_proposed_by = NULL WHERE id = $1")
+    sqlx::query("UPDATE games SET draw_proposed_by = NULL, draw_proposal_message_id = NULL WHERE id = $1")
         .bind(game_id)
         .execute(pool)
         .await?;
@@ -413,6 +417,7 @@ fn row_to_game_row(row: &sqlx::any::AnyRow) -> GameRow {
         result: row.get("result"),
         last_message_id: row.get("last_message_id"),
         draw_proposed_by: row.get("draw_proposed_by"),
+        draw_proposal_message_id: row.get("draw_proposal_message_id"),
     }
 }
 
@@ -423,7 +428,7 @@ pub async fn find_ongoing_game(
     black_id: i64,
 ) -> Result<Option<GameRow>> {
     let row = sqlx::query(
-        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id, draw_proposed_by
+        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id, draw_proposed_by, draw_proposal_message_id
          FROM games
          WHERE chat_id = $1 AND status = 'ongoing'
            AND ((white_user_id = $2 AND black_user_id = $3)
@@ -445,10 +450,11 @@ pub async fn find_game_by_message(
     message_id: i64,
 ) -> Result<Option<GameRow>> {
     let row = sqlx::query(
-        "SELECT g.id, g.chat_id, g.white_user_id, g.black_user_id, g.current_fen, g.turn, g.status, g.result, g.last_message_id, g.draw_proposed_by
+        "SELECT g.id, g.chat_id, g.white_user_id, g.black_user_id, g.current_fen, g.turn, g.status, g.result, g.last_message_id, g.draw_proposed_by, g.draw_proposal_message_id
          FROM games g
          WHERE g.chat_id = $1 
            AND (g.last_message_id = $2 
+                OR g.draw_proposal_message_id = $2
                 OR EXISTS (
                     SELECT 1 FROM game_messages gm 
                     WHERE gm.game_id = g.id AND gm.message_id = $2

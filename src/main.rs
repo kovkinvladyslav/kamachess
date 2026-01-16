@@ -33,6 +33,9 @@ async fn main() -> Result<()> {
         .to_string();
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://kamachess.db?mode=rwc".to_string());
+    
+    // Check for --notrash flag to enable deletion of previous board messages during gameplay
+    let no_trash = env::args().any(|arg| arg == "--notrash");
 
     sqlx::any::install_default_drivers();
 
@@ -47,7 +50,12 @@ async fn main() -> Result<()> {
         db: pool,
         telegram: api::TelegramApi::new(bot_token),
         bot_username,
+        no_trash,
     });
+    
+    if no_trash {
+        info!("No-trash mode enabled: previous board messages will be deleted during gameplay");
+    }
 
     info!("Bot started. Waiting for updates...");
 

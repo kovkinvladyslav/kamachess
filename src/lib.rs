@@ -13,4 +13,5 @@ pub struct AppState {
     pub db: Pool<Any>,
     pub telegram: api::TelegramApi,
     pub bot_username: String,
+    pub no_trash: bool,
 }

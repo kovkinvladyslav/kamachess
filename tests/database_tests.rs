@@ -369,7 +369,7 @@ async fn test_propose_and_clear_draw() {
         .unwrap();
     db::update_game_message(&pool, game_id, 1).await.unwrap();
 
-    db::propose_draw(&pool, game_id, white.id).await.unwrap();
+    db::propose_draw(&pool, game_id, white.id, 123).await.unwrap();
     let game = db::find_game_by_message(&pool, -700, 1).await.unwrap().unwrap();
     assert_eq!(game.draw_proposed_by, Some(white.id));
 

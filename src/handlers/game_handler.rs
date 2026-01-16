@@ -419,8 +419,6 @@ pub async fn handle_draw_proposal(
         return Ok(());
     }
 
-    db::propose_draw(&state.db, game.id, player.id).await?;
-
     let white = db::get_user_by_id(&state.db, game.white_user_id).await?;
     let black = db::get_user_by_id(&state.db, game.black_user_id).await?;
     let opponent = if player.id == game.white_user_id {
@@ -429,7 +427,7 @@ pub async fn handle_draw_proposal(
         &white
     };
 
-    state
+    let proposal_message_id = state
         .telegram
         .send_message(
             chat_id,
@@ -441,6 +439,8 @@ pub async fn handle_draw_proposal(
             ),
         )
         .await?;
+
+    db::propose_draw(&state.db, game.id, player.id, proposal_message_id).await?;
 
     Ok(())
 }
@@ -456,7 +456,7 @@ pub async fn handle_accept_draw(
         .reply_to_message
         .as_ref()
         .map(|msg| msg.message_id)
-        .ok_or_else(|| anyhow!("Accept must be a reply to the bot's board message"))?;
+        .ok_or_else(|| anyhow!("Accept must be a reply to the bot's board message or draw proposal message"))?;
 
     let Some(game) = db::find_game_by_message(&state.db, chat_id, reply_id).await? else {
         return Ok(());
@@ -542,6 +542,25 @@ async fn send_board_update(
         .await?;
     
     if let Some(gid) = game_id {
+        // If no_trash mode is enabled, delete all previous board messages for this game
+        // before adding the new one, keeping only the most recent board image
+        if state.no_trash {
+            let previous_message_ids = db::get_game_message_ids(&state.db, gid).await?;
+            for prev_id in previous_message_ids {
+                if let Err(e) = state.telegram.delete_message(chat_id, prev_id).await {
+                    error!(
+                        chat_id = chat_id,
+                        game_id = gid,
+                        message_id = prev_id,
+                        error = %e,
+                        "Failed to delete previous game message in no-trash mode"
+                    );
+                }
+            }
+            // Delete all previous message records from database
+            db::delete_game_messages(&state.db, gid).await?;
+        }
+        
         let _ = db::insert_game_message(&state.db, gid, message_id).await;
     }
     

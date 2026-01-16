@@ -96,6 +96,7 @@ pub struct GameRow {
     #[allow(dead_code)]
     pub last_message_id: Option<i64>,
     pub draw_proposed_by: Option<i64>,
+    pub draw_proposal_message_id: Option<i64>,
 }
 
 #[derive(Debug, FromRow)]

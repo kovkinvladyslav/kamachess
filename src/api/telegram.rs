@@ -15,7 +15,7 @@ impl TelegramApi {
         }
     }
 
-    pub async fn send_message(&self, chat_id: i64, reply_to: i64, text: &str) -> Result<()> {
+    pub async fn send_message(&self, chat_id: i64, reply_to: i64, text: &str) -> Result<i64> {
         let url = format!("{}/sendMessage", self.base_url);
         let body = SendMessageRequest {
             chat_id,
@@ -40,7 +40,10 @@ impl TelegramApi {
             return Err(anyhow!("Telegram API error: {}", error_msg));
         }
 
-        Ok(())
+        Ok(resp
+            .result
+            .ok_or_else(|| anyhow!("Telegram API error: missing result in response"))?
+            .message_id)
     }
 
     pub async fn send_photo(
