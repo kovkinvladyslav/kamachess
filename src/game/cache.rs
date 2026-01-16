@@ -52,7 +52,6 @@ where
     Ok(bytes)
 }
 
-/// Get the cache file path for a board position
 fn get_cache_path(board: &Board, flip_board: bool) -> PathBuf {
     let fen = board.to_string();
     let flip_suffix = if flip_board { "_flipped" } else { "" };
@@ -60,7 +59,6 @@ fn get_cache_path(board: &Board, flip_board: bool) -> PathBuf {
     PathBuf::from(CACHE_DIR).join(format!("{}{}.png", safe_fen, flip_suffix))
 }
 
-/// Read cached image from disk
 fn read_cached_image(path: &Path) -> Result<Vec<u8>> {
     let mut file = fs::File::open(path).context("Failed to open cached image")?;
     let mut bytes = Vec::new();
@@ -68,7 +66,6 @@ fn read_cached_image(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Check cache size and evict LRU files if limit exceeded
 fn check_and_evict_if_needed(cache_dir: &Path) -> Result<()> {
     let max_size_mb = get_cache_size_limit_mb();
     let max_size_bytes = max_size_mb * 1024 * 1024;
@@ -89,7 +86,6 @@ fn check_and_evict_if_needed(cache_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Calculate total size of all cached PNG files
 fn calculate_cache_size(cache_dir: &Path) -> Result<u64> {
     let mut total_size = 0u64;
 
@@ -107,9 +103,7 @@ fn calculate_cache_size(cache_dir: &Path) -> Result<u64> {
     Ok(total_size)
 }
 
-/// Evict LRU files until target size is reached
 fn evict_lru_files(cache_dir: &Path, current_size: u64, target_size: u64) -> Result<()> {
-    // Collect all PNG files with their metadata
     let mut files: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
 
     for entry in fs::read_dir(cache_dir).context("Failed to read cache directory")? {
@@ -125,7 +119,6 @@ fn evict_lru_files(cache_dir: &Path, current_size: u64, target_size: u64) -> Res
         }
     }
 
-    // Sort by modification time (oldest first) for LRU eviction
     files.sort_by_key(|(_, _, mtime)| *mtime);
 
     let mut freed_size = 0u64;
@@ -157,7 +150,6 @@ fn evict_lru_files(cache_dir: &Path, current_size: u64, target_size: u64) -> Res
     Ok(())
 }
 
-/// Get cache size limit from environment variable
 fn get_cache_size_limit_mb() -> u64 {
     std::env::var("IMAGE_CACHE_SIZE_MB")
         .ok()

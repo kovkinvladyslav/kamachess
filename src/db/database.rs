@@ -28,9 +28,7 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
 }
 
 pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
-    // First, check if there's a username-only entry that needs to be merged
     if let Some(username) = user.username.as_deref() {
-        // Try to update an existing username-only entry (where telegram_id IS NULL)
         let updated = sqlx::query(
             "UPDATE users
              SET telegram_id = $1, first_name = $2, last_name = $3
@@ -43,13 +41,11 @@ pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
         .execute(pool)
         .await?;
 
-        // If we updated a username-only entry, we're done
         if updated.rows_affected() > 0 {
             return get_user_by_telegram_id(pool, user.id).await;
         }
     }
 
-    // Otherwise, insert or update by telegram_id
     sqlx::query(
         "INSERT INTO users (telegram_id, username, first_name, last_name)
          VALUES ($1, $2, $3, $4)

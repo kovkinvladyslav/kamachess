@@ -64,45 +64,87 @@ fn draw_coordinates(img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) 
     let board_span = (SQUARE_SIZE * 8) as i32;
     let label_color = Rgba([220, 200, 180, 255]);
 
-    for rank in 0..8 {
-        for file in 0..8 {
-            let x0 = origin_x + (file * SQUARE_SIZE) as i32;
-            let y0 = origin_y + (rank * SQUARE_SIZE) as i32;
+    let (side1_y, side2_y) =
+        calculate_vertical_side_positions(margin, file_glyph_h, origin_y, board_span, pad);
+    let (side1_x, side2_x) =
+        calculate_horizontal_side_positions(margin, rank_glyph_w, origin_x, board_span, pad);
 
-            if rank == 0 {
-                let file_idx = if flip_board { 7 - file } else { file };
-                let letter = (b'a' + file_idx as u8) as char;
-                let glyph = glyph_for_file(letter);
-                let x = x0 + (SQUARE_SIZE as i32 - file_glyph_w) / 2;
-                let y = (margin - file_glyph_h) / 2 + pad;
-                draw_glyph_file(img, x, y, label_color, &glyph, scale);
-            }
-            if rank == 7 {
-                let file_idx = if flip_board { 7 - file } else { file };
-                let letter = (b'a' + file_idx as u8) as char;
-                let glyph = glyph_for_file(letter);
-                let x = x0 + (SQUARE_SIZE as i32 - file_glyph_w) / 2;
-                let y = origin_y + board_span + (margin - file_glyph_h) / 2 - pad;
-                draw_glyph_file(img, x, y, label_color, &glyph, scale);
-            }
+    draw_labels_on_two_sides(
+        img,
+        0..8,
+        |file| {
+            let file_idx = if flip_board { 7 - file } else { file };
+            let letter = (b'a' + file_idx as u8) as char;
+            glyph_for_file(letter)
+        },
+        |file| {
+            let x =
+                origin_x + (file * SQUARE_SIZE) as i32 + (SQUARE_SIZE as i32 - file_glyph_w) / 2;
+            ((x, side1_y), (x, side2_y))
+        },
+        label_color,
+        scale,
+        |img,
+                 x,
+                 y,
+                 glyph,
+                 color,
+                 scale| {
+            draw_glyph_file(img, x, y, color, glyph, scale);
+        },
+    );
 
-            if file == 0 {
-                let rank_num = if flip_board { rank + 1 } else { 8 - rank };
-                let number = rank_num as u8;
-                let glyph = glyph_for_rank(number);
-                let x = (margin - rank_glyph_w) / 2 + pad;
-                let y = y0 + (SQUARE_SIZE as i32 - rank_glyph_h) / 2;
-                draw_glyph_rank(img, x, y, label_color, &glyph, scale);
-            }
-            if file == 7 {
-                let rank_num = if flip_board { rank + 1 } else { 8 - rank };
-                let number = rank_num as u8;
-                let glyph = glyph_for_rank(number);
-                let x = origin_x + board_span + (margin - rank_glyph_w) / 2 - pad;
-                let y = y0 + (SQUARE_SIZE as i32 - rank_glyph_h) / 2;
-                draw_glyph_rank(img, x, y, label_color, &glyph, scale);
-            }
-        }
+    draw_labels_on_two_sides(
+        img,
+        0..8,
+        |rank| {
+            let rank_num = if flip_board { rank + 1 } else { 8 - rank };
+            let number = rank_num as u8;
+            glyph_for_rank(number)
+        },
+        |rank| {
+            let y = origin_y + (rank * SQUARE_SIZE) as i32 + (SQUARE_SIZE as i32 - rank_glyph_h) / 2;
+            ((side1_x, y), (side2_x, y))
+        },
+        label_color,
+        scale,
+        |img, x, y, glyph, color, scale| {
+            draw_glyph_rank(img, x, y, color, glyph, scale);
+        },
+    );
+}
+
+fn calculate_vertical_side_positions(margin: i32, glyph_h: i32, origin_y: i32, board_span: i32, pad: i32) -> (i32, i32) {
+    let side1 = (margin - glyph_h) / 2 + pad;
+    let side2 = origin_y + board_span + (margin - glyph_h) / 2 - pad;
+    (side1, side2)
+}
+
+fn calculate_horizontal_side_positions(margin: i32, glyph_w: i32, origin_x: i32, board_span: i32, pad: i32) -> (i32, i32) {
+    let side1 = (margin - glyph_w) / 2 + pad;
+    let side2 = origin_x + board_span + (margin - glyph_w) / 2 - pad;
+    (side1, side2)
+}
+
+fn draw_labels_on_two_sides<G, F1, F4, const N: usize>(
+    img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+    indices: impl Iterator<Item = u32>,
+    get_glyph: G,
+    get_coords: F1,
+    color: Rgba<u8>,
+    scale: i32,
+    draw_fn: F4,
+) where
+    G: Fn(u32) -> [u8; N],
+    F1: Fn(u32) -> ((i32, i32), (i32, i32)),
+    F4: Fn(&mut ImageBuffer<Rgba<u8>, Vec<u8>>, i32, i32, &[u8; N], Rgba<u8>, i32),
+{
+    for idx in indices {
+        let glyph = get_glyph(idx);
+        let ((x1, y1), (x2, y2)) = get_coords(idx);
+        
+        draw_fn(img, x1, y1, &glyph, color, scale);
+        draw_fn(img, x2, y2, &glyph, color, scale);
     }
 }
 
@@ -126,19 +168,23 @@ fn draw_scaled_pixel(
     }
 }
 
+struct GlyphParams {
+    width: usize,
+    bit_shift: usize,
+}
+
 fn draw_glyph(
     img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     x: i32,
     y: i32,
     color: Rgba<u8>,
     glyph: &[u8],
-    width: usize,
-    bit_shift: usize,
+    params: GlyphParams,
     scale: i32,
 ) {
     for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..width {
-            if (bits >> (bit_shift - col)) & 1 == 1 {
+        for col in 0..params.width {
+            if (bits >> (params.bit_shift - col)) & 1 == 1 {
                 draw_scaled_pixel(img, x, y, col, row, scale, color);
             }
         }
@@ -153,7 +199,7 @@ fn draw_glyph_file(
     glyph: &[u8; 9],
     scale: i32,
 ) {
-    draw_glyph(img, x, y, color, glyph, 5, 4, scale);
+    draw_glyph(img, x, y, color, glyph, GlyphParams { width: 5, bit_shift: 4 }, scale);
 }
 
 fn draw_glyph_rank(
@@ -164,7 +210,7 @@ fn draw_glyph_rank(
     glyph: &[u8; 7],
     scale: i32,
 ) {
-    draw_glyph(img, x, y, color, glyph, 7, 6, scale);
+    draw_glyph(img, x, y, color, glyph, GlyphParams { width: 7, bit_shift: 6 }, scale);
 }
 
 fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>, flip_board: bool) {

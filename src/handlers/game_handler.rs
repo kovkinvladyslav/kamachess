@@ -526,7 +526,6 @@ async fn send_board_update(
         board.side_to_move(),
         result_line,
     );
-    // Flip the board when it's Black's turn
     let flip_board = board.side_to_move() == Color::Black;
     let image = game::render_board_png(board, flip_board)?;
     state

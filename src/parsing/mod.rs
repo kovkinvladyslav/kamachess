@@ -18,11 +18,9 @@ pub fn extract_usernames(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Normalize Cyrillic characters to Latin equivalents for chess notation
 fn normalize_chess_input(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            // Cyrillic lowercase to Latin lowercase
             'а' => 'a',
             'б' => 'b',
             'с' => 'c',
@@ -31,7 +29,6 @@ fn normalize_chess_input(s: &str) -> String {
             'ф' => 'f',
             'г' => 'g',
             'х' => 'h',
-            // Cyrillic uppercase to Latin uppercase (for piece notation)
             'А' => 'A',
             'В' => 'B',
             'С' => 'C',
@@ -44,7 +41,6 @@ fn normalize_chess_input(s: &str) -> String {
             'Н' => 'N',
             'Р' => 'R',
             'О' => 'O',
-            // Keep everything else as-is
             _ => c,
         })
         .collect()
@@ -54,7 +50,6 @@ pub fn extract_move(text: &str) -> Option<String> {
     text.split_whitespace().rev().find_map(|token| {
         let cleaned = token
             .trim_matches(|c: char| {
-                // Keep SAN characters: -, +, #, =, x, X, O, 0
                 !c.is_alphanumeric()
                     && c != '-'
                     && c != '+'
@@ -68,7 +63,6 @@ pub fn extract_move(text: &str) -> Option<String> {
             })
             .to_string();
 
-        // Normalize Cyrillic to Latin
         let normalized = normalize_chess_input(&cleaned);
 
         if is_move_candidate(&normalized) {
@@ -95,7 +89,6 @@ fn is_move_candidate(token: &str) -> bool {
         return false;
     }
 
-    // Check for castling notation variants
     if token.eq_ignore_ascii_case("O-O")
         || token.eq_ignore_ascii_case("O-O-O")
         || token == "0-0"
@@ -108,19 +101,16 @@ fn is_move_candidate(token: &str) -> bool {
         return true;
     }
 
-    // Allow alphanumeric and SAN-specific characters: -, +, #, =, x (for captures)
     if !token.chars().all(|c| {
         c.is_alphanumeric() || c == '-' || c == '+' || c == '#' || c == '=' || c == 'x' || c == 'X'
     }) {
         return false;
     }
 
-    // Must contain at least one digit (rank number) unless it's castling
     if !token.chars().any(|c| c.is_ascii_digit()) {
         return false;
     }
 
-    // First character must be a valid piece letter (K, Q, R, B, N) or file letter (a-h)
     let first = token.chars().next().unwrap();
     let valid_first = matches!(first.to_ascii_uppercase(), 'K' | 'Q' | 'R' | 'B' | 'N')
         || matches!(first.to_ascii_lowercase(), 'a'..='h');
