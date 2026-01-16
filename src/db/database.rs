@@ -210,36 +210,57 @@ pub fn insert_move(
 
 pub fn next_move_number(conn: &rusqlite::Connection, game_id: i64) -> Result<i64> {
     conn.query_row(
-        "SELECT COUNT(*) FROM moves WHERE game_id = ?1",
+        "SELECT COALESCE(MAX(move_number), 0) + 1 FROM moves WHERE game_id = ?1",
         params![game_id],
-        |row| {
-            let count: i64 = row.get(0)?;
-            Ok(count + 1)
-        },
+        |row| row.get(0),
     )
     .map_err(|err| anyhow!(err))
 }
 
-fn get_game_san_moves(conn: &rusqlite::Connection, game_id: i64) -> Vec<String> {
-    let mut stmt = match conn
-        .prepare("SELECT san, uci FROM moves WHERE game_id = ?1 ORDER BY move_number ASC")
-    {
+use std::collections::HashMap;
+
+fn get_games_san_moves(
+    conn: &rusqlite::Connection,
+    game_ids: &[i64],
+) -> HashMap<i64, Vec<String>> {
+    if game_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let placeholders: String = game_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT game_id, san, uci FROM moves WHERE game_id IN ({}) ORDER BY game_id, move_number ASC",
+        placeholders
+    );
+
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
-        Err(_) => return Vec::new(),
+        Err(_) => return HashMap::new(),
     };
 
-    stmt.query_map(params![game_id], |row| {
-        let san: Option<String> = row.get(0)?;
-        let uci: String = row.get(1)?;
-        Ok(san.unwrap_or(uci))
-    })
-    .ok()
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    let params: Vec<&dyn rusqlite::ToSql> = game_ids
+        .iter()
+        .map(|id| id as &dyn rusqlite::ToSql)
+        .collect();
+
+    let rows = match stmt.query_map(params.as_slice(), |row| {
+        let game_id: i64 = row.get(0)?;
+        let san: Option<String> = row.get(1)?;
+        let uci: String = row.get(2)?;
+        Ok((game_id, san.unwrap_or(uci)))
+    }) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut result: HashMap<i64, Vec<String>> = HashMap::new();
+    for row in rows.flatten() {
+        result.entry(row.0).or_default().push(row.1);
+    }
+    result
 }
 
-fn build_lichess_url(conn: &rusqlite::Connection, game_id: i64) -> String {
-    let moves = get_game_san_moves(conn, game_id);
+fn build_lichess_url_from_moves(moves: &[String]) -> String {
     if moves.is_empty() {
         return "https://lichess.org/analysis".to_string();
     }
@@ -379,13 +400,17 @@ pub fn format_user_history(
         })
     })?;
 
+    let history_rows: Vec<HistoryRow> = rows.filter_map(|r| r.ok()).collect();
+    let game_ids: Vec<i64> = history_rows.iter().map(|r| r.id).collect();
+    let all_moves = get_games_san_moves(conn, &game_ids);
+
     let mut lines = Vec::new();
-    for row in rows {
-        let row = row?;
-        let result = row.result.unwrap_or_else(|| "ongoing".to_string());
+    for row in &history_rows {
+        let result = row.result.clone().unwrap_or_else(|| "ongoing".to_string());
         let white_name = crate::utils::format_username(&row.white_username);
         let black_name = crate::utils::format_username(&row.black_username);
-        let lichess_url = build_lichess_url(conn, row.id);
+        let moves = all_moves.get(&row.id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let lichess_url = build_lichess_url_from_moves(moves);
         lines.push(format!(
             "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
             row.local_num, white_name, black_name, result, lichess_url
@@ -455,13 +480,17 @@ pub fn format_head_to_head(
         },
     )?;
 
+    let history_rows: Vec<HistoryRow> = rows.filter_map(|r| r.ok()).collect();
+    let game_ids: Vec<i64> = history_rows.iter().map(|r| r.id).collect();
+    let all_moves = get_games_san_moves(conn, &game_ids);
+
     let mut lines = Vec::new();
-    for row in rows {
-        let row = row?;
-        let result = row.result.unwrap_or_else(|| "ongoing".to_string());
+    for row in &history_rows {
+        let result = row.result.clone().unwrap_or_else(|| "ongoing".to_string());
         let white_name = crate::utils::format_username(&row.white_username);
         let black_name = crate::utils::format_username(&row.black_username);
-        let lichess_url = build_lichess_url(conn, row.id);
+        let moves = all_moves.get(&row.id).map(|v| v.as_slice()).unwrap_or(&[]);
+        let lichess_url = build_lichess_url_from_moves(moves);
         lines.push(format!(
             "#{}: {} vs {} ({}) - <a href=\"{}\">analysis</a>",
             row.local_num, white_name, black_name, result, lichess_url

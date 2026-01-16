@@ -35,7 +35,12 @@ async fn main() -> Result<()> {
     let db_path = env::var("DATABASE_PATH").unwrap_or_else(|_| "kamachess.db".to_string());
 
     let manager = SqliteConnectionManager::file(db_path).with_init(|conn| {
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -16000;",
+        )?;
         Ok(())
     });
     let pool = Pool::new(manager)?;

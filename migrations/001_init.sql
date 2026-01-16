@@ -40,5 +40,14 @@ CREATE TABLE IF NOT EXISTS moves (
 CREATE INDEX IF NOT EXISTS idx_games_chat_message
     ON games(chat_id, last_message_id);
 
+CREATE INDEX IF NOT EXISTS idx_games_chat_status
+    ON games(chat_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_games_chat_players
+    ON games(chat_id, white_user_id, black_user_id);
+
 CREATE INDEX IF NOT EXISTS idx_moves_game
     ON moves(game_id);
+
+CREATE INDEX IF NOT EXISTS idx_moves_game_number
+    ON moves(game_id, move_number);

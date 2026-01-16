@@ -1,24 +1,22 @@
 use crate::models::{Message, SendMessageRequest, TelegramResponse, Update};
 use anyhow::{anyhow, Result};
 
-const TELEGRAM_API_BASE: &str = "https://api.telegram.org/bot";
-
 #[derive(Clone)]
 pub struct TelegramApi {
     client: reqwest::Client,
-    token: String,
+    base_url: String,
 }
 
 impl TelegramApi {
     pub fn new(token: String) -> Self {
         Self {
             client: reqwest::Client::new(),
-            token,
+            base_url: format!("https://api.telegram.org/bot{}", token),
         }
     }
 
     pub async fn send_message(&self, chat_id: i64, reply_to: i64, text: &str) -> Result<()> {
-        let url = format!("{}{}/sendMessage", TELEGRAM_API_BASE, self.token);
+        let url = format!("{}/sendMessage", self.base_url);
         let body = SendMessageRequest {
             chat_id,
             text: text.to_string(),
@@ -52,7 +50,7 @@ impl TelegramApi {
         caption: &str,
         png: Vec<u8>,
     ) -> Result<i64> {
-        let url = format!("{}{}/sendPhoto", TELEGRAM_API_BASE, self.token);
+        let url = format!("{}/sendPhoto", self.base_url);
         let mut form = reqwest::multipart::Form::new()
             .text("chat_id", chat_id.to_string())
             .text("caption", caption.to_string())
@@ -91,7 +89,7 @@ impl TelegramApi {
     }
 
     pub async fn get_updates(&self, offset: Option<i64>, timeout: i32) -> Result<Vec<Update>> {
-        let url = format!("{}{}/getUpdates", TELEGRAM_API_BASE, self.token);
+        let url = format!("{}/getUpdates", self.base_url);
         let mut params = vec![("timeout", timeout.to_string())];
         if let Some(offset) = offset {
             params.push(("offset", offset.to_string()));

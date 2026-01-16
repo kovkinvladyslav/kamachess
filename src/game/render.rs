@@ -1,7 +1,6 @@
-use anyhow::{anyhow, Result};
-use chess::{Board, Color, Piece, Square};
+use anyhow::Result;
+use chess::{Board, Color, File, Piece, Rank, Square};
 use image::{ImageBuffer, Rgba};
-use std::str::FromStr;
 
 use super::glyphs::{glyph_for_file, glyph_for_rank, piece_pattern};
 
@@ -19,7 +18,7 @@ pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
 
     draw_board_squares(&mut img);
     draw_coordinates(&mut img);
-    draw_pieces(board, &mut img)?;
+    draw_pieces(board, &mut img);
 
     let mut bytes = Vec::new();
     img.write_to(
@@ -152,10 +151,10 @@ fn draw_glyph_rank(
     }
 }
 
-fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<()> {
+fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) {
     for rank in 0..8 {
         for file in 0..8 {
-            let square = square_from_coords(file, 7 - rank)?;
+            let square = square_from_coords(file, 7 - rank);
             if let Some(piece) = board.piece_on(square) {
                 let color = board.color_on(square).unwrap_or(Color::White);
 
@@ -177,14 +176,12 @@ fn draw_pieces(board: &Board, img: &mut ImageBuffer<Rgba<u8>, Vec<u8>>) -> Resul
             }
         }
     }
-    Ok(())
 }
 
-fn square_from_coords(file: u32, rank: u32) -> Result<Square> {
-    let file_char = (b'a' + file as u8) as char;
-    let rank_char = (b'1' + rank as u8) as char;
-    let coord = format!("{}{}", file_char, rank_char);
-    Square::from_str(&coord).map_err(|e| anyhow!("Invalid coordinates: {}", e))
+fn square_from_coords(file: u32, rank: u32) -> Square {
+    let f = File::from_index(file as usize);
+    let r = Rank::from_index(rank as usize);
+    Square::make_square(r, f)
 }
 
 fn draw_piece(
