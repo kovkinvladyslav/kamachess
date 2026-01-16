@@ -1,0 +1,1 @@
+ALTER TABLE games ADD COLUMN IF NOT EXISTS draw_proposed_by BIGINT;
