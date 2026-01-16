@@ -6,3 +6,5 @@
 *.db-wal
 *.log.*
 /images_cache
+.cursor
+.idea
