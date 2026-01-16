@@ -11,18 +11,20 @@ path = "src/lib.rs"
 name = "kamachess"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]
+
 [dependencies]
 anyhow = "1.0"
-axum = "0.7"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chess = "3.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.24"
-rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sqlx = { version = "0.8", features = ["runtime-tokio", "any"] }
 tokio = { version = "1.37", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
