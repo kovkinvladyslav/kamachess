@@ -4,6 +4,7 @@ pub mod game;
 pub mod handlers;
 pub mod models;
 pub mod parsing;
+pub mod server;
 pub mod utils;
 
 use sqlx::{Any, Pool};

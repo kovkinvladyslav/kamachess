@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
-use kamachess::{api, db, handlers, AppState};
+use kamachess::{api, db, server, AppState};
 use sqlx::any::AnyPoolOptions;
-use std::{env, sync::Arc, time::Duration};
-use tracing::{error, info};
+use std::{env, sync::Arc};
+use tracing::info;
 use tracing_subscriber::prelude::*;
 
 #[tokio::main]
@@ -34,8 +34,6 @@ async fn main() -> Result<()> {
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://kamachess.db?mode=rwc".to_string());
     
-    // No-trash mode is now default: previous board messages are deleted during gameplay
-    // Use --keep-messages to disable this behavior
     let no_trash = !env::args().any(|arg| arg == "--keep-messages");
 
     sqlx::any::install_default_drivers();
@@ -58,24 +56,25 @@ async fn main() -> Result<()> {
         info!("Keep-messages mode: previous board messages will be kept during gameplay");
     }
 
-    info!("Bot started. Waiting for updates...");
+    let webhook_url = env::var("WEBHOOK_URL")
+        .map_err(|_| anyhow!("WEBHOOK_URL environment variable is required"))?;
+    let webhook_port = env::var("WEBHOOK_PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .map_err(|_| anyhow!("WEBHOOK_PORT must be a valid port number"))?;
+    let webhook_path = env::var("WEBHOOK_PATH")
+        .unwrap_or_else(|_| "/webhook".to_string());
+    let webhook_secret_token = env::var("WEBHOOK_SECRET_TOKEN").ok();
 
-    let mut offset: Option<i64> = None;
-    loop {
-        match state.telegram.get_updates(offset, 30).await {
-            Ok(updates) => {
-                for update in updates {
-                    offset = Some(update.update_id + 1);
+    info!("Starting webhook server...");
+    info!(webhook_url = %webhook_url, webhook_port = webhook_port, webhook_path = %webhook_path, "Webhook configuration");
 
-                    if let Err(err) = handlers::process_update(state.clone(), update).await {
-                        error!("Failed to process update: {err:?}");
-                    }
-                }
-            }
-            Err(err) => {
-                error!("Error getting updates: {err:?}");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        }
-    }
+    server::start_webhook_server(
+        state,
+        webhook_url,
+        webhook_port,
+        webhook_path,
+        webhook_secret_token,
+    )
+    .await
 }

@@ -1,0 +1,83 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+docs/
+*.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Rust build artifacts (not needed in build context)
+target/
+Cargo.lock.bak
+
+# Environment files (use docker secrets or env vars)
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+kamachess.db*
+
+# Test files
+tests/
+
+# Docker
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile*
+.dockerignore
+
+# CI/CD
+Jenkinsfile
+.github/
+.gitlab-ci.yml
+
+# Jenkins
+jenkins/
+
+# Monitoring config (will be mounted or copied separately)
+monitoring/
+
+# Nginx config (will be mounted or copied separately)
+nginx/
+
+# Scripts (will be copied separately if needed)
+scripts/
+
+# Cache
+images_cache/
+*.cache
+
+# Screenshots
+screenshots/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+*.o
+*.so
+*.dylib

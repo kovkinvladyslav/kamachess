@@ -15,6 +15,15 @@ impl TelegramApi {
         }
     }
 
+    /// Creates a TelegramApi instance with a custom base URL.
+    /// This is primarily used for testing with mock servers.
+    pub fn new_with_base_url(base_url: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url,
+        }
+    }
+
     pub async fn send_message(&self, chat_id: i64, reply_to: i64, text: &str) -> Result<i64> {
         let url = format!("{}/sendMessage", self.base_url);
         let body = SendMessageRequest {
@@ -147,5 +156,79 @@ impl TelegramApi {
         }
 
         Ok(resp.result.unwrap_or_default())
+    }
+
+    pub async fn set_webhook(&self, url: &str, secret_token: Option<&str>) -> Result<()> {
+        let url_endpoint = format!("{}/setWebhook", self.base_url);
+        let mut body = serde_json::json!({
+            "url": url,
+        });
+
+        if let Some(token) = secret_token {
+            body["secret_token"] = serde_json::json!(token);
+        }
+
+        let resp: TelegramResponse<serde_json::Value> = self
+            .client
+            .post(&url_endpoint)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if !resp.ok {
+            let error_msg = resp
+                .description
+                .unwrap_or_else(|| "setWebhook failed".to_string());
+            return Err(anyhow!("Telegram API error: {}", error_msg));
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_webhook(&self) -> Result<()> {
+        let url = format!("{}/deleteWebhook", self.base_url);
+
+        let resp: TelegramResponse<serde_json::Value> = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({}))
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if !resp.ok {
+            let error_msg = resp
+                .description
+                .unwrap_or_else(|| "deleteWebhook failed".to_string());
+            return Err(anyhow!("Telegram API error: {}", error_msg));
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_webhook_info(&self) -> Result<serde_json::Value> {
+        let url = format!("{}/getWebhookInfo", self.base_url);
+
+        let resp: TelegramResponse<serde_json::Value> = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if !resp.ok {
+            let error_msg = resp
+                .description
+                .unwrap_or_else(|| "getWebhookInfo failed".to_string());
+            return Err(anyhow!("Telegram API error: {}", error_msg));
+        }
+
+        Ok(resp
+            .result
+            .ok_or_else(|| anyhow!("Telegram API error: missing result in response"))?)
     }
 }

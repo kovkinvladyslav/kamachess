@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Message {
     pub message_id: i64,
     pub chat: Chat,
@@ -16,18 +16,18 @@ pub struct Message {
     pub reply_to_message: Option<ReplyMessage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ReplyMessage {
     pub message_id: i64,
     pub from: Option<User>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Chat {
     pub id: i64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct User {
     pub id: i64,
     pub is_bot: bool,

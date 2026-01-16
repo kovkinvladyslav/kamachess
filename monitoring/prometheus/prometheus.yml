@@ -1,0 +1,49 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'kamachess'
+    environment: 'production'
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Load rules once and periodically evaluate them (optional)
+# rule_files:
+#   - "alertrules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          job: 'prometheus'
+          instance: 'prometheus'
+
+  # Bot application metrics (if metrics endpoint is added)
+  - job_name: 'kamachess-bot'
+    static_configs:
+      - targets: ['bot:8080']
+        labels:
+          job: 'kamachess-bot'
+          instance: 'bot'
+          service: 'bot'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # Node exporter - system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          job: 'node-exporter'
+          instance: 'node-exporter'
+          service: 'system'
