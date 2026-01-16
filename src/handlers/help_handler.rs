@@ -23,6 +23,7 @@ Examples:
 <b>Making Moves:</b>
 Reply to the bot's board message with your move.
 Supports: e4, e2e4, Nf6, O-O, etc.
+You can also use: /move e4, /move Nf6
 
 <b>/resign</b>
 Reply to the bot's board message to resign.
@@ -32,6 +33,8 @@ Reply to the bot's board message to propose a draw.
 
 <b>/accept</b>
 Reply to the bot's board message to accept a draw proposal.
+
+Commands also work with @botname suffix (e.g. /draw@botname).
 
 Use /help to show this message."#;
 
