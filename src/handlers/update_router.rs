@@ -75,16 +75,7 @@ pub async fn process_update(state: Arc<AppState>, update: Update) -> Result<()> 
             return Ok(());
         }
 
-        if text.starts_with("/move") {
-            let move_text = strip_bot_suffix(text, &state.bot_username);
-            let move_part = move_text.strip_prefix("/move").unwrap_or("").trim();
-            if !move_part.is_empty() {
-                game_handler::handle_move(state, &message, from, move_part).await?;
-            } else {
-                game_handler::handle_move(state, &message, from, text).await?;
-            }
-            return Ok(());
-        }
+
 
         game_handler::handle_move(state, &message, from, text).await?;
         return Ok(());
