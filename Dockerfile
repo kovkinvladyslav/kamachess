@@ -37,5 +37,6 @@ RUN mkdir -p /app/logs
 
 ENV LOG_DIR=/app/logs
 ENV RUST_LOG=info
+ENV IMAGE_CACHE_SIZE_MB=100
 
 CMD ["kamachess"]

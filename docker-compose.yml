@@ -8,7 +8,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kamachess -d kamachess"]
+      test: [ "CMD-SHELL", "pg_isready -U kamachess -d kamachess" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,6 +24,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME}
       RUST_LOG: ${RUST_LOG:-info}
+      IMAGE_CACHE_SIZE_MB: ${IMAGE_CACHE_SIZE_MB:-100}
     volumes:
       - bot_logs:/app/logs
     restart: unless-stopped
