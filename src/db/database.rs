@@ -28,6 +28,28 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
 }
 
 pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
+    // First, check if there's a username-only entry that needs to be merged
+    if let Some(username) = user.username.as_deref() {
+        // Try to update an existing username-only entry (where telegram_id IS NULL)
+        let updated = sqlx::query(
+            "UPDATE users
+             SET telegram_id = $1, first_name = $2, last_name = $3
+             WHERE username = $4 AND telegram_id IS NULL",
+        )
+        .bind(user.id)
+        .bind(&user.first_name)
+        .bind(&user.last_name)
+        .bind(username)
+        .execute(pool)
+        .await?;
+
+        // If we updated a username-only entry, we're done
+        if updated.rows_affected() > 0 {
+            return get_user_by_telegram_id(pool, user.id).await;
+        }
+    }
+
+    // Otherwise, insert or update by telegram_id
     sqlx::query(
         "INSERT INTO users (telegram_id, username, first_name, last_name)
          VALUES ($1, $2, $3, $4)
@@ -42,20 +64,6 @@ pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
     .bind(&user.last_name)
     .execute(pool)
     .await?;
-
-    if let Some(username) = user.username.as_deref() {
-        sqlx::query(
-            "UPDATE users
-             SET telegram_id = $1, first_name = $2, last_name = $3
-             WHERE username = $4 AND (telegram_id IS NULL OR telegram_id = $1)",
-        )
-        .bind(user.id)
-        .bind(&user.first_name)
-        .bind(&user.last_name)
-        .bind(username)
-        .execute(pool)
-        .await?;
-    }
 
     get_user_by_telegram_id(pool, user.id).await
 }
@@ -282,10 +290,12 @@ pub async fn insert_move(
 }
 
 pub async fn next_move_number(pool: &Pool<Any>, game_id: i64) -> Result<i64> {
-    let row = sqlx::query("SELECT COALESCE(MAX(move_number), 0) + 1 as next FROM moves WHERE game_id = $1")
-        .bind(game_id)
-        .fetch_one(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT COALESCE(MAX(move_number), 0) + 1 as next FROM moves WHERE game_id = $1",
+    )
+    .bind(game_id)
+    .fetch_one(pool)
+    .await?;
     Ok(row.get("next"))
 }
 

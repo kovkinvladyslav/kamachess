@@ -18,6 +18,38 @@ pub fn extract_usernames(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Normalize Cyrillic characters to Latin equivalents for chess notation
+fn normalize_chess_input(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            // Cyrillic lowercase to Latin lowercase
+            'а' => 'a',
+            'б' => 'b',
+            'с' => 'c',
+            'д' => 'd',
+            'е' => 'e',
+            'ф' => 'f',
+            'г' => 'g',
+            'х' => 'h',
+            // Cyrillic uppercase to Latin uppercase (for piece notation)
+            'А' => 'A',
+            'В' => 'B',
+            'С' => 'C',
+            'Д' => 'D',
+            'Е' => 'E',
+            'Ф' => 'F',
+            'Г' => 'G',
+            'Х' => 'H',
+            'К' => 'K',
+            'Н' => 'N',
+            'Р' => 'R',
+            'О' => 'O',
+            // Keep everything else as-is
+            _ => c,
+        })
+        .collect()
+}
+
 pub fn extract_move(text: &str) -> Option<String> {
     text.split_whitespace().rev().find_map(|token| {
         let cleaned = token
@@ -32,14 +64,23 @@ pub fn extract_move(text: &str) -> Option<String> {
                     && c != 'X'
                     && c != 'O'
                     && c != '0'
+                    && !is_cyrillic(c)
             })
             .to_string();
-        if is_move_candidate(&cleaned) {
-            Some(cleaned) // Don't lowercase - preserve case for SAN notation
+
+        // Normalize Cyrillic to Latin
+        let normalized = normalize_chess_input(&cleaned);
+
+        if is_move_candidate(&normalized) {
+            Some(normalized)
         } else {
             None
         }
     })
+}
+
+fn is_cyrillic(c: char) -> bool {
+    matches!(c, 'а'..='я' | 'А'..='Я')
 }
 
 pub fn extract_page(text: &str) -> Option<u32> {
@@ -204,7 +245,10 @@ mod tests {
             extract_usernames("/start @opponent Nf3"),
             vec!["opponent".to_string()]
         );
-        assert_eq!(extract_move("/start @opponent Nf3"), Some("Nf3".to_string()));
+        assert_eq!(
+            extract_move("/start @opponent Nf3"),
+            Some("Nf3".to_string())
+        );
     }
 
     #[test]
@@ -220,7 +264,10 @@ mod tests {
 
     #[test]
     fn test_username_edge_cases() {
-        assert_eq!(extract_usernames("@user_name"), vec!["user_name".to_string()]);
+        assert_eq!(
+            extract_usernames("@user_name"),
+            vec!["user_name".to_string()]
+        );
         assert_eq!(extract_usernames("@User123"), vec!["User123".to_string()]);
         assert_eq!(extract_usernames("@"), Vec::<String>::new());
         assert_eq!(extract_usernames("@ "), Vec::<String>::new());
@@ -243,5 +290,22 @@ mod tests {
         let mv = extract_move(text);
         assert_eq!(usernames, vec!["player".to_string()]);
         assert_eq!(mv, None);
+    }
+
+    #[test]
+    fn test_cyrillic_moves() {
+        // Cyrillic 'с' (U+0441) should be normalized to Latin 'c' (U+0063)
+        assert_eq!(extract_move("с5"), Some("c5".to_string()));
+        assert_eq!(extract_move("с7с5"), Some("c7c5".to_string()));
+        assert_eq!(extract_move("е4"), Some("e4".to_string()));
+        assert_eq!(extract_move("е2е4"), Some("e2e4".to_string()));
+
+        // Mixed Cyrillic and Latin should still work
+        assert_eq!(extract_move("д4"), Some("d4".to_string()));
+        assert_eq!(extract_move("ф3"), Some("f3".to_string()));
+
+        // Piece moves with Cyrillic
+        assert_eq!(extract_move("Кф3"), Some("Kf3".to_string()));
+        assert_eq!(extract_move("Нф3"), Some("Nf3".to_string()));
     }
 }
