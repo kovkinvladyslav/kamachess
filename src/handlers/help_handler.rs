@@ -23,7 +23,6 @@ Examples:
 <b>Making Moves:</b>
 Reply to the bot's board message with your move.
 Supports: e4, e2e4, Nf6, O-O, etc.
-You can also use: /move e4, /move Nf6
 
 <b>/resign</b>
 Reply to the bot's board message to resign.
