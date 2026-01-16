@@ -9,7 +9,6 @@ pub async fn handle_history(
     from: &User,
     text: &str,
 ) -> Result<()> {
-    let conn = state.db.get()?;
     let chat_id = message.chat.id;
 
     let usernames: Vec<String> = parsing::extract_usernames(text)
@@ -23,16 +22,16 @@ pub async fn handle_history(
     }
 
     let user_a = if let Some(username) = usernames.first() {
-        db::upsert_user_by_username(&conn, username)?
+        db::upsert_user_by_username(&state.db, username).await?
     } else {
-        db::upsert_user(&conn, from)?
+        db::upsert_user(&state.db, from).await?
     };
 
     let response = if let Some(username_b) = usernames.get(1) {
-        let user_b = db::upsert_user_by_username(&conn, username_b)?;
-        db::format_head_to_head(&conn, &user_a, &user_b, chat_id, page)?
+        let user_b = db::upsert_user_by_username(&state.db, username_b).await?;
+        db::format_head_to_head(&state.db, &user_a, &user_b, chat_id, page).await?
     } else {
-        db::format_user_history(&conn, &user_a, chat_id, page)?
+        db::format_user_history(&state.db, &user_a, chat_id, page).await?
     };
 
     state
