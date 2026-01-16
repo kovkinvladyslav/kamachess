@@ -88,6 +88,38 @@ impl TelegramApi {
             .message_id)
     }
 
+    pub async fn delete_message(&self, chat_id: i64, message_id: i64) -> Result<()> {
+        let url = format!("{}/deleteMessage", self.base_url);
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+        });
+
+        let resp: TelegramResponse<serde_json::Value> = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if !resp.ok {
+            let error_msg = resp
+                .description
+                .unwrap_or_else(|| "deleteMessage failed".to_string());
+            // Don't fail if message is already deleted or too old
+            if error_msg.contains("message to delete not found")
+                || error_msg.contains("message can't be deleted")
+            {
+                return Ok(());
+            }
+            return Err(anyhow!("Telegram API error: {}", error_msg));
+        }
+
+        Ok(())
+    }
+
     pub async fn get_updates(&self, offset: Option<i64>, timeout: i32) -> Result<Vec<Update>> {
         let url = format!("{}/getUpdates", self.base_url);
         let mut params = vec![("timeout", timeout.to_string())];

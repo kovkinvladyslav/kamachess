@@ -5,7 +5,7 @@ use chess::Board;
 use chess::Color;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 pub async fn handle_start_game(
     state: Arc<AppState>,
@@ -118,6 +118,7 @@ pub async fn handle_start_game(
         &white,
         &black,
         None,
+        Some(game_id),
     )
     .await?;
 
@@ -250,10 +251,12 @@ pub async fn handle_move(
 
     let status = next_board.status();
     let mut result_line = None;
+    let mut game_result: Option<&str> = None;
 
     if status != chess::BoardStatus::Ongoing {
         let (status_text, result) = determine_game_result(&status, side_to_move, &white, &black);
         result_line = Some(status_text);
+        game_result = Some(result);
         game.status = "finished".to_string();
         game.result = Some(result.to_string());
         db::update_game_result(&state.db, game.id, &game.result, &game.status).await?;
@@ -262,19 +265,36 @@ pub async fn handle_move(
 
     db::update_game_fen(&state.db, game.id, &game.current_fen, &game.turn).await?;
 
-    let message_id = send_board_update(
-        state.clone(),
-        chat_id,
-        Some(message.message_id),
-        "Move played",
-        &next_board,
-        &white,
-        &black,
-        result_line,
-    )
-    .await?;
+    // If game ended, don't send board update - we'll cleanup and send final message instead
+    if status != chess::BoardStatus::Ongoing {
+        cleanup_game_messages(state.clone(), chat_id, game.id).await?;
+        let result_text = result_line.unwrap_or_else(|| "Game ended.".to_string());
+        send_game_end_message(
+            state,
+            chat_id,
+            message.message_id,
+            &white,
+            &black,
+            game_result.unwrap_or(""),
+            &result_text,
+        )
+        .await?;
+    } else {
+        let message_id = send_board_update(
+            state.clone(),
+            chat_id,
+            Some(message.message_id),
+            "Move played",
+            &next_board,
+            &white,
+            &black,
+            result_line,
+            Some(game.id),
+        )
+        .await?;
 
-    db::update_game_message(&state.db, game.id, message_id).await?;
+        db::update_game_message(&state.db, game.id, message_id).await?;
+    }
 
     Ok(())
 }
@@ -349,8 +369,6 @@ pub async fn handle_resign(state: Arc<AppState>, message: &Message, from: &User)
     let white = db::get_user_by_id(&state.db, game.white_user_id).await?;
     let black = db::get_user_by_id(&state.db, game.black_user_id).await?;
 
-    let board = Board::from_str(&game.current_fen).map_err(|e| anyhow!("Invalid FEN: {}", e))?;
-
     let (winner, loser, result) = if player.id == game.white_user_id {
         (&black, &white, "0-1")
     } else {
@@ -360,25 +378,23 @@ pub async fn handle_resign(state: Arc<AppState>, message: &Message, from: &User)
     db::update_game_result(&state.db, game.id, &Some(result.to_string()), "finished").await?;
     db::update_player_stats(&state.db, game.white_user_id, game.black_user_id, result).await?;
 
-    let result_line = format!(
+    let result_text = format!(
         "{} resigned. {} wins.",
         loser.mention_html(),
         winner.mention_html()
     );
 
-    let message_id = send_board_update(
-        state.clone(),
+    cleanup_game_messages(state.clone(), chat_id, game.id).await?;
+    send_game_end_message(
+        state,
         chat_id,
-        Some(message.message_id),
-        "Game ended",
-        &board,
+        message.message_id,
         &white,
         &black,
-        Some(result_line),
+        result,
+        &result_text,
     )
     .await?;
-
-    db::update_game_message(&state.db, game.id, message_id).await?;
 
     Ok(())
 }
@@ -481,28 +497,25 @@ pub async fn handle_accept_draw(
         return Ok(());
     }
 
-    let board = Board::from_str(&game.current_fen).map_err(|e| anyhow!("Invalid FEN: {}", e))?;
     let white = db::get_user_by_id(&state.db, game.white_user_id).await?;
     let black = db::get_user_by_id(&state.db, game.black_user_id).await?;
 
     db::update_game_result(&state.db, game.id, &Some("1/2-1/2".to_string()), "finished").await?;
     db::update_player_stats(&state.db, game.white_user_id, game.black_user_id, "1/2-1/2").await?;
 
-    let result_line = format!("Draw accepted by {}.", player.mention_html());
+    let result_text = format!("Draw accepted by {}.", player.mention_html());
 
-    let message_id = send_board_update(
-        state.clone(),
+    cleanup_game_messages(state.clone(), chat_id, game.id).await?;
+    send_game_end_message(
+        state,
         chat_id,
-        Some(message.message_id),
-        "Game ended",
-        &board,
+        message.message_id,
         &white,
         &black,
-        Some(result_line),
+        "1/2-1/2",
+        &result_text,
     )
     .await?;
-
-    db::update_game_message(&state.db, game.id, message_id).await?;
 
     Ok(())
 }
@@ -517,6 +530,7 @@ async fn send_board_update(
     white: &crate::models::DbUser,
     black: &crate::models::DbUser,
     result_line: Option<String>,
+    game_id: Option<i64>,
 ) -> Result<i64> {
     let caption = game::build_caption(
         header,
@@ -528,8 +542,67 @@ async fn send_board_update(
     );
     let flip_board = board.side_to_move() == Color::Black;
     let image = game::render_board_png(board, flip_board)?;
-    state
+    let message_id = state
         .telegram
         .send_photo(chat_id, reply_to, &caption, image)
-        .await
+        .await?;
+    
+    if let Some(gid) = game_id {
+        let _ = db::insert_game_message(&state.db, gid, message_id).await;
+    }
+    
+    Ok(message_id)
+}
+
+async fn cleanup_game_messages(
+    state: Arc<AppState>,
+    chat_id: i64,
+    game_id: i64,
+) -> Result<()> {
+    let message_ids = db::get_game_message_ids(&state.db, game_id).await?;
+    
+    for message_id in message_ids {
+        if let Err(e) = state.telegram.delete_message(chat_id, message_id).await {
+            error!(
+                chat_id = chat_id,
+                game_id = game_id,
+                message_id = message_id,
+                error = %e,
+                "Failed to delete game message"
+            );
+        }
+    }
+    
+    db::delete_game_messages(&state.db, game_id).await?;
+    Ok(())
+}
+
+async fn send_game_end_message(
+    state: Arc<AppState>,
+    chat_id: i64,
+    reply_to: i64,
+    _white: &crate::models::DbUser,
+    _black: &crate::models::DbUser,
+    result: &str,
+    result_text: &str,
+) -> Result<()> {
+    let result_notation = match result {
+        "1-0" => "1-0",
+        "0-1" => "0-1",
+        "1/2-1/2" => "1/2-1/2",
+        _ => result,
+    };
+    
+    let message = format!(
+        "Game ended.\n{}\nResult: {}",
+        result_text,
+        result_notation
+    );
+    
+    state
+        .telegram
+        .send_message(chat_id, reply_to, &message)
+        .await?;
+    
+    Ok(())
 }

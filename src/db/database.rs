@@ -14,12 +14,22 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
         ))
         .execute(pool)
         .await;
+        let _ = sqlx::raw_sql(include_str!(
+            "../../migrations/postgres/003_add_game_messages.sql"
+        ))
+        .execute(pool)
+        .await;
     } else {
         sqlx::raw_sql(include_str!("../../migrations/sqlite/001_init.sql"))
             .execute(pool)
             .await?;
         let _ = sqlx::raw_sql(include_str!(
             "../../migrations/sqlite/002_add_draw_proposed_by.sql"
+        ))
+        .execute(pool)
+        .await;
+        let _ = sqlx::raw_sql(include_str!(
+            "../../migrations/sqlite/003_add_game_messages.sql"
         ))
         .execute(pool)
         .await;
@@ -433,6 +443,37 @@ pub async fn find_game_by_message(
     .await?;
 
     Ok(row.map(|r| row_to_game_row(&r)))
+}
+
+pub async fn insert_game_message(pool: &Pool<Any>, game_id: i64, message_id: i64) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO game_messages (game_id, message_id, created_at)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(game_id)
+    .bind(message_id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_game_message_ids(pool: &Pool<Any>, game_id: i64) -> Result<Vec<i64>> {
+    let rows = sqlx::query("SELECT message_id FROM game_messages WHERE game_id = $1 ORDER BY created_at ASC")
+        .bind(game_id)
+        .fetch_all(pool)
+        .await?;
+    
+    Ok(rows.into_iter().map(|row| row.get("message_id")).collect())
+}
+
+pub async fn delete_game_messages(pool: &Pool<Any>, game_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM game_messages WHERE game_id = $1")
+        .bind(game_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 pub async fn format_user_history(
