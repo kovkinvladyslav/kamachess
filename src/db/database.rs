@@ -39,9 +39,11 @@ pub async fn run_migrations(pool: &Pool<Any>, database_url: &str) -> Result<()> 
 
 pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
     if let Some(username) = user.username.as_deref() {
+        // 1. Check if there's a placeholder user (telegram_id IS NULL) with this username.
+        // If so, update that user's telegram_id instead of creating a new one.
+        // This ensures games started with usernames can be continued by the actual user.
         let updated = sqlx::query(
-            "UPDATE users
-             SET telegram_id = $1, first_name = $2, last_name = $3
+            "UPDATE users SET telegram_id = $1, first_name = $2, last_name = $3
              WHERE username = $4 AND telegram_id IS NULL",
         )
         .bind(user.id)
@@ -52,10 +54,21 @@ pub async fn upsert_user(pool: &Pool<Any>, user: &User) -> Result<DbUser> {
         .await?;
 
         if updated.rows_affected() > 0 {
+            // We updated an existing placeholder user, return it
             return get_user_by_telegram_id(pool, user.id).await;
         }
+
+        // 2. Clear this username from any *other* user to prevent UNIQUE constraint violation.
+        // This handles the case where another user (or a stale record with different ID) holds the username.
+        sqlx::query("UPDATE users SET username = NULL WHERE username = $1 AND telegram_id != $2")
+            .bind(username)
+            .bind(user.id)
+            .execute(pool)
+            .await?;
     }
 
+    // 3. Now we can safely upsert the user.
+    // The username is now free (except possibly on our own row, which is fine).
     sqlx::query(
         "INSERT INTO users (telegram_id, username, first_name, last_name)
          VALUES ($1, $2, $3, $4)
@@ -432,9 +445,14 @@ pub async fn find_game_by_message(
     message_id: i64,
 ) -> Result<Option<GameRow>> {
     let row = sqlx::query(
-        "SELECT id, chat_id, white_user_id, black_user_id, current_fen, turn, status, result, last_message_id, draw_proposed_by
-         FROM games
-         WHERE chat_id = $1 AND last_message_id = $2
+        "SELECT g.id, g.chat_id, g.white_user_id, g.black_user_id, g.current_fen, g.turn, g.status, g.result, g.last_message_id, g.draw_proposed_by
+         FROM games g
+         WHERE g.chat_id = $1 
+           AND (g.last_message_id = $2 
+                OR EXISTS (
+                    SELECT 1 FROM game_messages gm 
+                    WHERE gm.game_id = g.id AND gm.message_id = $2
+                ))
          LIMIT 1",
     )
     .bind(chat_id)
@@ -460,11 +478,13 @@ pub async fn insert_game_message(pool: &Pool<Any>, game_id: i64, message_id: i64
 }
 
 pub async fn get_game_message_ids(pool: &Pool<Any>, game_id: i64) -> Result<Vec<i64>> {
-    let rows = sqlx::query("SELECT message_id FROM game_messages WHERE game_id = $1 ORDER BY created_at ASC")
-        .bind(game_id)
-        .fetch_all(pool)
-        .await?;
-    
+    let rows = sqlx::query(
+        "SELECT message_id FROM game_messages WHERE game_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(game_id)
+    .fetch_all(pool)
+    .await?;
+
     Ok(rows.into_iter().map(|row| row.get("message_id")).collect())
 }
 

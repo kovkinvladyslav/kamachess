@@ -68,6 +68,33 @@ async fn test_upsert_user_by_username() {
 }
 
 #[tokio::test]
+async fn test_upsert_user_merges_placeholder() {
+    let pool = setup_test_db().await;
+    
+    // Create a placeholder user (like when starting a game with /start @username)
+    let placeholder = db::upsert_user_by_username(&pool, "emovadilda").await.unwrap();
+    let placeholder_id = placeholder.id;
+    assert_eq!(placeholder.telegram_id, None);
+    assert_eq!(placeholder.username, Some("emovadilda".to_string()));
+    
+    // Now the real user tries to make a move (they have telegram_id)
+    let real_user = User {
+        id: 12345,
+        is_bot: false,
+        username: Some("emovadilda".to_string()),
+        first_name: Some("Real".to_string()),
+        last_name: None,
+    };
+    let merged_user = db::upsert_user(&pool, &real_user).await.unwrap();
+    
+    // Should be the same user ID (merged, not a new user)
+    assert_eq!(merged_user.id, placeholder_id);
+    assert_eq!(merged_user.telegram_id, Some(12345));
+    assert_eq!(merged_user.username, Some("emovadilda".to_string()));
+    assert_eq!(merged_user.first_name, Some("Real".to_string()));
+}
+
+#[tokio::test]
 async fn test_get_user_by_telegram_id() {
     let pool = setup_test_db().await;
     let user = test_user(99999, Some("finder"));
@@ -164,6 +191,47 @@ async fn test_find_game_by_message() {
     db::update_game_message(&pool, game_id, message_id).await.unwrap();
 
     let found = db::find_game_by_message(&pool, chat_id, message_id)
+        .await
+        .unwrap();
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().id, game_id);
+}
+
+#[tokio::test]
+async fn test_find_game_by_message_via_game_messages_table() {
+    let pool = setup_test_db().await;
+    let white = db::upsert_user(&pool, &test_user(1, None)).await.unwrap();
+    let black = db::upsert_user(&pool, &test_user(2, None)).await.unwrap();
+    let chat_id = -400;
+    let old_message_id = 100;
+    let new_message_id = 101;
+
+    let game_id = db::create_game(
+        &pool,
+        chat_id,
+        white.id,
+        black.id,
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "white",
+    )
+    .await
+    .unwrap();
+    
+    // Insert an old message into game_messages table
+    db::insert_game_message(&pool, game_id, old_message_id).await.unwrap();
+    
+    // Update last_message_id to a newer message
+    db::update_game_message(&pool, game_id, new_message_id).await.unwrap();
+
+    // Should find game by old message ID via game_messages table
+    let found = db::find_game_by_message(&pool, chat_id, old_message_id)
+        .await
+        .unwrap();
+    assert!(found.is_some());
+    assert_eq!(found.unwrap().id, game_id);
+    
+    // Should also find game by new message ID via last_message_id
+    let found = db::find_game_by_message(&pool, chat_id, new_message_id)
         .await
         .unwrap();
     assert!(found.is_some());

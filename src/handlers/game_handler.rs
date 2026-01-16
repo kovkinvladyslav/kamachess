@@ -149,6 +149,12 @@ pub async fn handle_move(
         return Ok(());
     }
 
+    // Check if there's a move attempt first - if not, silently ignore
+    let Some(candidate) = parsing::extract_move(text) else {
+        return Ok(());
+    };
+
+    // Only validate player and turn if they're actually trying to make a move
     let player = db::upsert_user(&state.db, from).await?;
     if player.id != game.white_user_id && player.id != game.black_user_id {
         state
@@ -177,18 +183,6 @@ pub async fn handle_move(
             .await?;
         return Ok(());
     }
-
-    let Some(candidate) = parsing::extract_move(text) else {
-        state
-            .telegram
-            .send_message(
-                chat_id,
-                message.message_id,
-                "Please send a move like e4, e2e4, or Nf6.",
-            )
-            .await?;
-        return Ok(());
-    };
 
     let before_fen = board.to_string();
     let mv = match game::parse_move(&board, &candidate) {
