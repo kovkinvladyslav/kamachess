@@ -1,18 +1,39 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chess::{Board, Color, File, Piece, Rank, Square};
 use image::{ImageBuffer, Rgba};
+use std::fs;
+use std::io::Read;
+use std::path::PathBuf;
 
 use super::glyphs::{glyph_for_file, glyph_for_rank, piece_pattern};
 
 const SQUARE_SIZE: u32 = 64;
 const COORD_MARGIN: u32 = 20;
 const BOARD_SIZE: u32 = SQUARE_SIZE * 8 + COORD_MARGIN * 2;
+const CACHE_DIR: &str = "images_cache";
 
 const LIGHT_SQUARE: Rgba<u8> = Rgba([240, 217, 181, 255]);
 const DARK_SQUARE: Rgba<u8> = Rgba([181, 136, 99, 255]);
 const COORD_BORDER: Rgba<u8> = Rgba([101, 76, 59, 255]);
 
 pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
+    let fen = board.to_string();
+    let safe_fen = fen.replace(['/', ' '], "_");
+    let cache_dir = PathBuf::from(CACHE_DIR);
+
+    if !cache_dir.exists() {
+        fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
+    }
+
+    let file_path = cache_dir.join(format!("{}.png", safe_fen));
+
+    if file_path.exists() {
+        let mut file = fs::File::open(&file_path).context("Failed to open cached image")?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        return Ok(bytes);
+    }
+
     let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> =
         ImageBuffer::from_pixel(BOARD_SIZE, BOARD_SIZE, COORD_BORDER);
 
@@ -25,6 +46,10 @@ pub fn render_board_png(board: &Board) -> Result<Vec<u8>> {
         &mut std::io::Cursor::new(&mut bytes),
         image::ImageFormat::Png,
     )?;
+
+    // Save to cache
+    // We ignore errors here because caching failure shouldn't stop the game
+    let _ = fs::write(file_path, &bytes);
 
     Ok(bytes)
 }
