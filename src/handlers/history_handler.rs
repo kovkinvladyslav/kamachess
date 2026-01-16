@@ -1,7 +1,7 @@
+use crate::models::{Message, User};
+use crate::{db, parsing, AppState};
 use anyhow::Result;
 use std::sync::Arc;
-use crate::models::{Message, User};
-use crate::{AppState, db, parsing};
 
 pub async fn handle_history(
     state: Arc<AppState>,
@@ -39,6 +39,6 @@ pub async fn handle_history(
         .telegram
         .send_message(chat_id, message.message_id, &response)
         .await?;
-    
+
     Ok(())
 }

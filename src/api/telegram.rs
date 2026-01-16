@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
 use crate::models::{Message, SendMessageRequest, TelegramResponse, Update};
+use anyhow::{anyhow, Result};
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org/bot";
 
@@ -25,7 +25,7 @@ impl TelegramApi {
             reply_to_message_id: Some(reply_to),
             parse_mode: Some("HTML".to_string()),
         };
-        
+
         let resp: TelegramResponse<Message> = self
             .client
             .post(&url)
@@ -34,13 +34,14 @@ impl TelegramApi {
             .await?
             .json()
             .await?;
-            
+
         if !resp.ok {
-            let error_msg = resp.description
+            let error_msg = resp
+                .description
                 .unwrap_or_else(|| "sendMessage failed".to_string());
             return Err(anyhow!("Telegram API error: {}", error_msg));
         }
-        
+
         Ok(())
     }
 
@@ -62,11 +63,11 @@ impl TelegramApi {
                     .file_name("board.png")
                     .mime_str("image/png")?,
             );
-            
+
         if let Some(reply_to) = reply_to {
             form = form.text("reply_to_message_id", reply_to.to_string());
         }
-        
+
         let resp: TelegramResponse<Message> = self
             .client
             .post(&url)
@@ -75,23 +76,23 @@ impl TelegramApi {
             .await?
             .json()
             .await?;
-            
+
         if !resp.ok {
-            let error_msg = resp.description
+            let error_msg = resp
+                .description
                 .unwrap_or_else(|| "sendPhoto failed".to_string());
             return Err(anyhow!("Telegram API error: {}", error_msg));
         }
-        
-        Ok(resp.result
+
+        Ok(resp
+            .result
             .ok_or_else(|| anyhow!("Telegram API error: missing result in response"))?
             .message_id)
     }
 
     pub async fn get_updates(&self, offset: Option<i64>, timeout: i32) -> Result<Vec<Update>> {
         let url = format!("{}{}/getUpdates", TELEGRAM_API_BASE, self.token);
-        let mut params = vec![
-            ("timeout", timeout.to_string()),
-        ];
+        let mut params = vec![("timeout", timeout.to_string())];
         if let Some(offset) = offset {
             params.push(("offset", offset.to_string()));
         }
@@ -106,7 +107,8 @@ impl TelegramApi {
             .await?;
 
         if !resp.ok {
-            let error_msg = resp.description
+            let error_msg = resp
+                .description
                 .unwrap_or_else(|| "getUpdates failed".to_string());
             return Err(anyhow!("Telegram API error: {}", error_msg));
         }

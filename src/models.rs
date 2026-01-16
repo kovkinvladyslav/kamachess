@@ -82,7 +82,11 @@ impl DbUser {
                 .as_deref()
                 .or(self.username.as_deref())
                 .unwrap_or("player");
-            format!("<a href=\"tg://user?id={}\">{}</a>", id, crate::utils::escape_html(name))
+            format!(
+                "<a href=\"tg://user?id={}\">{}</a>",
+                id,
+                crate::utils::escape_html(name)
+            )
         } else if let Some(username) = &self.username {
             format!("@{}", crate::utils::escape_html(username))
         } else {
@@ -127,6 +131,7 @@ impl GameRow {
 #[derive(Debug)]
 pub struct HistoryRow {
     pub id: i64,
+    pub local_num: i64,
     #[allow(dead_code)]
     pub started_at: String,
     pub result: Option<String>,

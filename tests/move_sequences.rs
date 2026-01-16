@@ -14,17 +14,24 @@ fn apply_moves(moves: &[&str]) -> Board {
 
 fn assert_piece(board: &Board, square: &str, piece: Piece, color: Color) {
     let sq = Square::from_str(square).expect("invalid square");
-    assert_eq!(board.piece_on(sq), Some(piece), "piece mismatch on {square}");
-    assert_eq!(board.color_on(sq), Some(color), "color mismatch on {square}");
+    assert_eq!(
+        board.piece_on(sq),
+        Some(piece),
+        "piece mismatch on {square}"
+    );
+    assert_eq!(
+        board.color_on(sq),
+        Some(color),
+        "color mismatch on {square}"
+    );
 }
 
 #[test]
 fn opera_game_finishing_position() {
     let moves = [
-        "e4", "e5", "Nf3", "d6", "d4", "Bg4", "dxe5", "Bxf3", "Qxf3", "dxe5",
-        "Bc4", "Nf6", "Qb3", "Qe7", "Nc3", "c6", "Bg5", "b5", "Nxb5", "cxb5",
-        "Bxb5+", "Nbd7", "O-O-O", "Rd8", "Rxd7", "Rxd7", "Rd1", "Qe6",
-        "Bxd7+", "Nxd7", "Qb8+", "Nxb8", "Rd8#",
+        "e4", "e5", "Nf3", "d6", "d4", "Bg4", "dxe5", "Bxf3", "Qxf3", "dxe5", "Bc4", "Nf6", "Qb3",
+        "Qe7", "Nc3", "c6", "Bg5", "b5", "Nxb5", "cxb5", "Bxb5+", "Nbd7", "O-O-O", "Rd8", "Rxd7",
+        "Rxd7", "Rd1", "Qe6", "Bxd7+", "Nxd7", "Qb8+", "Nxb8", "Rd8#",
     ];
     let board = apply_moves(&moves);
 
@@ -40,8 +47,7 @@ fn opera_game_finishing_position() {
 #[test]
 fn legall_mate_position() {
     let moves = [
-        "e4", "e5", "Nf3", "Nc6", "Bc4", "d6", "Nc3", "Bg4", "Nxe5",
-        "Bxd1", "Bxf7+", "Ke7", "Nd5#",
+        "e4", "e5", "Nf3", "Nc6", "Bc4", "d6", "Nc3", "Bg4", "Nxe5", "Bxd1", "Bxf7+", "Ke7", "Nd5#",
     ];
     let board = apply_moves(&moves);
 
@@ -55,8 +61,8 @@ fn legall_mate_position() {
 #[test]
 fn blackburne_shilling_mate_position() {
     let moves = [
-        "e4", "e5", "Nf3", "Nc6", "Bc4", "Nd4", "Nxe5", "Qg5", "Nxf7",
-        "Qxg2", "Rf1", "Qxe4+", "Be2", "Nf3#",
+        "e4", "e5", "Nf3", "Nc6", "Bc4", "Nd4", "Nxe5", "Qg5", "Nxf7", "Qxg2", "Rf1", "Qxe4+",
+        "Be2", "Nf3#",
     ];
     let board = apply_moves(&moves);
 

@@ -1,14 +1,11 @@
-use anyhow::Result;
-use std::sync::Arc;
 use crate::models::Message;
 use crate::AppState;
+use anyhow::Result;
+use std::sync::Arc;
 
-pub async fn handle_help(
-    state: Arc<AppState>,
-    message: &Message,
-) -> Result<()> {
+pub async fn handle_help(state: Arc<AppState>, message: &Message) -> Result<()> {
     let chat_id = message.chat.id;
-    
+
     let help_text = r#"<b>Chess Bot Commands:</b>
 
 <b>/start [@user] [move]</b>
@@ -42,6 +39,6 @@ Use /help to show this message."#;
         .telegram
         .send_message(chat_id, message.message_id, help_text)
         .await?;
-    
+
     Ok(())
 }

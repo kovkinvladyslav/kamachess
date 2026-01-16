@@ -3,13 +3,13 @@ use kamachess::{api, db, handlers, AppState};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use std::{env, sync::Arc, time::Duration};
-use tracing_subscriber::prelude::*;
 use tracing::{error, info};
+use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
-    
+
     let log_dir = env::var("LOG_DIR").unwrap_or_else(|_| "logs".to_string());
     std::fs::create_dir_all(&log_dir)?;
     let file_appender = tracing_appender::rolling::daily(&log_dir, "kamachess.log");
@@ -48,14 +48,14 @@ async fn main() -> Result<()> {
     });
 
     info!("Bot started. Waiting for updates...");
-    
+
     let mut offset: Option<i64> = None;
     loop {
         match state.telegram.get_updates(offset, 30).await {
             Ok(updates) => {
                 for update in updates {
                     offset = Some(update.update_id + 1);
-                    
+
                     if let Err(err) = handlers::process_update(state.clone(), update).await {
                         error!("Failed to process update: {err:?}");
                     }
