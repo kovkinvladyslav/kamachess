@@ -1,5 +1,5 @@
-use rusqlite;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 #[derive(Debug, Deserialize)]
 pub struct Update {
@@ -36,7 +36,7 @@ pub struct User {
     pub last_name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct DbUser {
     pub id: i64,
     pub telegram_id: Option<i64>,
@@ -50,19 +50,6 @@ pub struct DbUser {
 }
 
 impl DbUser {
-    pub fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get(0)?,
-            telegram_id: row.get(1)?,
-            username: row.get(2)?,
-            first_name: row.get(3)?,
-            last_name: row.get(4)?,
-            wins: row.get(5)?,
-            losses: row.get(6)?,
-            draws: row.get(7)?,
-        })
-    }
-
     pub fn display_name(&self) -> String {
         if let Some(username) = &self.username {
             format!("@{}", username)
@@ -95,7 +82,7 @@ impl DbUser {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct GameRow {
     pub id: i64,
     #[allow(dead_code)]
@@ -111,24 +98,7 @@ pub struct GameRow {
     pub draw_proposed_by: Option<i64>,
 }
 
-impl GameRow {
-    pub fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get(0)?,
-            chat_id: row.get(1)?,
-            white_user_id: row.get(2)?,
-            black_user_id: row.get(3)?,
-            current_fen: row.get(4)?,
-            turn: row.get(5)?,
-            status: row.get(6)?,
-            result: row.get(7)?,
-            last_message_id: row.get(8)?,
-            draw_proposed_by: row.get(9)?,
-        })
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct HistoryRow {
     pub id: i64,
     pub local_num: i64,
